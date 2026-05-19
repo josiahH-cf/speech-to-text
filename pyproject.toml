@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-dictation"
+version = "0.2.0"
+description = "Minimal Windows 11 local dictation tray app."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "faster-whisper==1.2.1",
+  "sounddevice==0.5.5",
+  "numpy>=2.2,<2.5",
+  "pywin32==311",
+  "pystray==0.19.5",
+  "Pillow==12.2.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<10"
+]
+build = [
+  "pyinstaller==6.20.0"
+]
+
+[project.scripts]
+local-dictation = "local_dictation.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
