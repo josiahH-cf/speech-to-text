@@ -4,17 +4,19 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
-Set-Location $root
+. "$PSScriptRoot\common.ps1"
+Set-LocalDictationRepoRoot
+Assert-LocalDictationPython312
 
 if (!(Test-Path ".\.venv\Scripts\python.exe")) {
   py -3.12 -m venv .venv
 }
 
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e ".[dev,build]"
-.\.venv\Scripts\python.exe -m pytest
-.\.venv\Scripts\python.exe -m compileall -q src tests
+$python = Get-LocalDictationVenvPython
+& $python -m pip install --upgrade pip
+& $python -m pip install -e ".[dev,build]"
+& $python -m pytest
+& $python -m compileall -q src tests
 
 Push-Location packaging
 try {

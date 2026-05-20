@@ -1,7 +1,11 @@
 $ErrorActionPreference = "Stop"
 
-.\.venv\Scripts\python.exe -m local_dictation doctor
-.\.venv\Scripts\python.exe -m local_dictation setup status
+. "$PSScriptRoot\common.ps1"
+Set-LocalDictationRepoRoot
+$python = Get-LocalDictationVenvPython
+
+& $python -m local_dictation doctor
+& $python -m local_dictation setup status
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Setup status is not complete yet. Run setup bootstrap when you are ready to prepare Ollama."
 }

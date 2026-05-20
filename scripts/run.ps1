@@ -1,3 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-.\.venv\Scripts\python.exe -m local_dictation run
+. "$PSScriptRoot\common.ps1"
+Set-LocalDictationRepoRoot
+$python = Get-LocalDictationVenvPython
+& $python -m local_dictation run
