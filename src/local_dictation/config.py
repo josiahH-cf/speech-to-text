@@ -3,10 +3,13 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 APP_NAME = "LocalDictation"
+KNOWN_STT_MODELS = ("tiny.en", "base.en", "small.en", "medium.en")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "config_version": 2,
@@ -15,6 +18,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "sample_rate": 16000,
         "channels": 1,
         "max_seconds": 120,
+        "input_device_id": None,
+        "gain_db": 0.0,
         "silence_stop": {
             "enabled": True,
             "min_recording_seconds": 1.5,
@@ -63,6 +68,13 @@ class SettingsError(RuntimeError):
     """Raised when settings cannot be read or written."""
 
 
+@dataclass(frozen=True)
+class CleanupResult:
+    path: Path
+    removed: bool
+    message: str
+
+
 def app_data_dir() -> Path:
     root = os.environ.get("APPDATA")
     if root:
@@ -76,6 +88,50 @@ def settings_path() -> Path:
 
 def logs_dir() -> Path:
     return app_data_dir() / "logs"
+
+
+def huggingface_hub_cache_dir() -> Path:
+    explicit_cache = os.environ.get("HUGGINGFACE_HUB_CACHE")
+    if explicit_cache:
+        return Path(explicit_cache)
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        return Path(hf_home) / "hub"
+    xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache_home:
+        return Path(xdg_cache_home) / "huggingface" / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def stt_model_cache_paths(models: tuple[str, ...] = KNOWN_STT_MODELS) -> tuple[Path, ...]:
+    hub = huggingface_hub_cache_dir()
+    paths: list[Path] = []
+    for model in models:
+        cache_name = f"models--Systran--faster-whisper-{model}"
+        paths.append(hub / cache_name)
+        paths.append(hub / ".locks" / cache_name)
+    return tuple(dict.fromkeys(paths))
+
+
+def cleanup_paths(paths: tuple[Path, ...], *, dry_run: bool = False) -> tuple[CleanupResult, ...]:
+    results: list[CleanupResult] = []
+    for path in paths:
+        if not path.exists():
+            results.append(CleanupResult(path, False, "not found"))
+            continue
+        if dry_run:
+            results.append(CleanupResult(path, False, "would remove"))
+            continue
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except OSError as exc:
+            results.append(CleanupResult(path, False, str(exc)))
+            continue
+        results.append(CleanupResult(path, True, "removed"))
+    return tuple(results)
 
 
 def deep_merge(defaults: dict[str, Any], loaded: dict[str, Any]) -> dict[str, Any]:

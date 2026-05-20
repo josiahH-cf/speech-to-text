@@ -86,6 +86,24 @@ def test_bootstrap_can_prepare_ollama_without_stt(monkeypatch, tmp_path):
     assert settings["setup"]["ollama_ready"] is True
 
 
+def test_bootstrap_can_enable_cleanup_after_ollama_setup(monkeypatch, tmp_path):
+    settings = {
+        "stt": {"model": "base.en"},
+        "cleanup": {"model": "gemma3:1b", "enabled": False},
+        "setup": {"ollama_install": "auto"},
+    }
+
+    monkeypatch.setattr("local_dictation.setup_manager.command_available", lambda command: command == "ollama")
+    monkeypatch.setattr("local_dictation.setup_manager.run_command", lambda command: (True, "pulled"))
+    monkeypatch.setattr("local_dictation.setup_manager.save_settings", lambda saved_settings: tmp_path / "settings.json")
+
+    status = bootstrap_setup(settings, include_stt=False, enable_cleanup=True)
+
+    assert status.ok is True
+    assert settings["setup"]["ollama_ready"] is True
+    assert settings["cleanup"]["enabled"] is True
+
+
 def test_setup_status_defaults_to_core_stt_status(monkeypatch):
     settings = {
         "stt": {"model": "base.en"},

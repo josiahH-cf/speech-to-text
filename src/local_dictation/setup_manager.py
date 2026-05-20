@@ -128,6 +128,7 @@ def bootstrap_setup(
     logger=None,
     include_stt: bool = True,
     include_ollama: bool = True,
+    enable_cleanup: bool = False,
 ) -> SetupStatus:
     settings = settings or load_settings(create=True)
     setup = settings.setdefault("setup", {})
@@ -164,10 +165,14 @@ def bootstrap_setup(
             ok, message = run_command(ollama_pull_command(model))
             setup["ollama_ready"] = bool(ok)
             steps.append(SetupStep("Ollama model", ok, message or model))
+            if ok and enable_cleanup:
+                cleanup["enabled"] = True
         else:
             setup["ollama_ready"] = False
     elif include_ollama:
         steps.append(SetupStep("Ollama", True, f"install mode is {ollama_mode}"))
+        if enable_cleanup:
+            cleanup["enabled"] = True
 
     setup["last_bootstrap_status"] = {
         "when": datetime.now().isoformat(timespec="seconds"),

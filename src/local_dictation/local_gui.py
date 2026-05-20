@@ -10,13 +10,23 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .config import load_settings, save_settings, settings_path
-from .settings_actions import update_core_settings
+from .settings_actions import update_settings
 from .setup_manager import collect_setup_status
 
 LOCAL_GUI_HOST = "127.0.0.1"
 LOCAL_GUI_PORT = 8765
 LOCAL_GUI_URL = f"http://{LOCAL_GUI_HOST}:{LOCAL_GUI_PORT}/"
 MAX_JSON_BYTES = 16 * 1024
+LOCAL_GUI_ALLOWED_HOSTS = {LOCAL_GUI_HOST, "localhost"}
+SECURITY_HEADERS = (
+  ("X-Content-Type-Options", "nosniff"),
+  ("Referrer-Policy", "no-referrer"),
+  (
+    "Content-Security-Policy",
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'",
+  ),
+)
 
 
 class LocalGuiServer:
@@ -94,35 +104,38 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
         self._send_error(404, "Not found.")
 
     def do_POST(self) -> None:
-        if self.headers.get("X-Local-Dictation-Token") != self.server.gui.token:
-            self._send_error(403, "Invalid local GUI token.")
-            return
+      if self.headers.get("X-Local-Dictation-Token") != self.server.gui.token:
+        self._send_error(403, "Invalid local GUI token.")
+        return
+      if not self._request_origin_is_allowed():
+        self._send_error(403, "Invalid local GUI origin.")
+        return
 
-        path = urlparse(self.path).path
-        try:
-            payload = self._read_json()
-            if path == "/api/settings":
-                self._update_settings(payload)
-                self._send_json(self._state_payload())
-                return
-            if path == "/api/runtime":
-                self._update_runtime(payload)
-                return
-            if path == "/api/recording":
-                self._toggle_recording()
-                return
-        except ValueError as exc:
-            self._send_error(400, str(exc))
-            return
-        except BusyError as exc:
-            self._send_error(409, str(exc))
-            return
-        except Exception as exc:
-            self.server.gui.logger.exception("Localhost GUI request failed.")
-            self._send_error(500, f"Request failed: {exc}")
-            return
+      path = urlparse(self.path).path
+      try:
+        payload = self._read_json()
+        if path == "/api/settings":
+          self._update_settings(payload)
+          self._send_json(self._state_payload())
+          return
+        if path == "/api/runtime":
+          self._update_runtime(payload)
+          return
+        if path == "/api/recording":
+          self._toggle_recording()
+          return
+      except ValueError as exc:
+        self._send_error(400, str(exc))
+        return
+      except BusyError as exc:
+        self._send_error(409, str(exc))
+        return
+      except Exception as exc:
+        self.server.gui.logger.exception("Localhost GUI request failed.")
+        self._send_error(500, f"Request failed: {exc}")
+        return
 
-        self._send_error(404, "Not found.")
+      self._send_error(404, "Not found.")
 
     def _read_json(self) -> dict[str, Any]:
         length_text = self.headers.get("Content-Length", "0")
@@ -141,9 +154,33 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
             raise ValueError("Request body must be a JSON object.")
         return payload
 
+    def _request_origin_is_allowed(self) -> bool:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        parsed = urlparse(origin)
+        if parsed.scheme.lower() != "http":
+            return False
+        hostname = (parsed.hostname or "").lower()
+        if hostname not in LOCAL_GUI_ALLOWED_HOSTS:
+            return False
+        try:
+            port = parsed.port
+        except ValueError:
+            return False
+        return port == int(self.server.server_address[1])
+
     def _state_payload(self) -> dict[str, Any]:
         app = self.server.gui.app
         settings = load_settings(create=True)
+        insertion = settings.get("insertion", {})
+        recording = settings.get("recording", {})
+        silence = recording.get("silence_stop", {})
+        result_payload = (
+            app.result_payload()
+            if hasattr(app, "result_payload")
+            else {"ok": True, "stage": "idle", "message": "Dictation is ready.", "inserted": False, "copiedToClipboard": False}
+        )
         return {
             "running": True,
             "runtimeEnabled": app.runtime_enabled(),
@@ -152,7 +189,14 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
             "sttModel": settings.get("stt", {}).get("model", "base.en"),
             "cleanupEnabled": bool(settings.get("cleanup", {}).get("enabled", False)),
             "cleanupModel": settings.get("cleanup", {}).get("model", "gemma3:1b"),
+            "insertionMode": insertion.get("mode", "auto"),
+            "inputDeviceId": "default" if recording.get("input_device_id") is None else str(recording.get("input_device_id")),
+            "gainDb": recording.get("gain_db", 0.0),
+            "silenceEnabled": bool(silence.get("enabled", True)),
+            "silenceSeconds": silence.get("silence_seconds", 1.4),
+            "speechThreshold": silence.get("speech_threshold", 0.012),
             "lastTranscriptAvailable": bool(getattr(app, "last_transcript", "")),
+            "lastResult": result_payload,
             "settingsPath": str(settings_path()),
             "setup": self._setup_payload(settings),
         }
@@ -165,16 +209,26 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
         }
 
     def _update_settings(self, payload: dict[str, Any]) -> None:
-        current = load_settings(create=True)
-        updated = update_core_settings(
-            current,
-            hotkey=str(payload.get("hotkey", current.get("hotkey", "ctrl+alt+space"))),
-            stt_model=str(payload.get("sttModel", current.get("stt", {}).get("model", "base.en"))),
-            cleanup_enabled=bool(payload.get("cleanupEnabled", current.get("cleanup", {}).get("enabled", False))),
-            cleanup_model=str(payload.get("cleanupModel", current.get("cleanup", {}).get("model", "gemma3:1b"))),
-        )
-        save_settings(updated)
-        self.server.gui.app.reload_settings(force=True)
+      current = load_settings(create=True)
+      insertion = current.get("insertion", {})
+      recording = current.get("recording", {})
+      silence = recording.get("silence_stop", {})
+      updated = update_settings(
+        current,
+        hotkey=str(payload.get("hotkey", current.get("hotkey", "ctrl+alt+space"))),
+        stt_model=str(payload.get("sttModel", current.get("stt", {}).get("model", "base.en"))),
+        cleanup_enabled=bool(payload.get("cleanupEnabled", current.get("cleanup", {}).get("enabled", False))),
+        cleanup_model=str(payload.get("cleanupModel", current.get("cleanup", {}).get("model", "gemma3:1b"))),
+        insertion_mode=str(payload.get("insertionMode", insertion.get("mode", "auto"))),
+        input_device_id=str(payload.get("inputDeviceId", recording.get("input_device_id") or "default")),
+        gain_db=str(payload.get("gainDb", recording.get("gain_db", 0.0))),
+        silence_enabled=bool(payload.get("silenceEnabled", silence.get("enabled", True))),
+        silence_seconds=str(payload.get("silenceSeconds", silence.get("silence_seconds", 1.4))),
+        speech_threshold=str(payload.get("speechThreshold", silence.get("speech_threshold", 0.012))),
+        startup_enabled=bool(current.get("startup", {}).get("enabled", False)),
+      )
+      save_settings(updated)
+      self.server.gui.app.reload_settings(force=True)
 
     def _update_runtime(self, payload: dict[str, Any]) -> None:
         enabled = payload.get("enabled")
@@ -201,6 +255,7 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(data)
 
@@ -210,8 +265,13 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self._send_security_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    def _send_security_headers(self) -> None:
+        for name, value in SECURITY_HEADERS:
+            self.send_header(name, value)
 
     def _send_error(self, status: int, message: str) -> None:
         self._send_json({"error": message}, status=status)
@@ -295,6 +355,7 @@ def _page_html(token: str) -> str:
           <span id=\"transcript-pill\" class=\"pill off\">No transcript</span>
           <span id=\"setup-pill\" class=\"pill off\">Speech model</span>
         </div>
+        <div id=\"last-result\" class=\"message\"></div>
         <div id=\"settings-path\" class=\"path\"></div>
       </section>
       <section>
@@ -308,6 +369,12 @@ def _page_html(token: str) -> str:
         <h2>Hotkey</h2>
         <label for=\"hotkey\">Binding</label>
         <input id=\"hotkey\" autocomplete=\"off\" spellcheck=\"false\">
+        <label for=\"insertion-mode\">Insertion</label>
+        <select id=\"insertion-mode\">
+          <option>auto</option>
+          <option>direct</option>
+          <option>clipboard</option>
+        </select>
       </section>
       <section>
         <h2>Models</h2>
@@ -321,6 +388,18 @@ def _page_html(token: str) -> str:
         <label><input id=\"cleanup-enabled\" type=\"checkbox\">Use cleanup</label>
         <label for=\"cleanup-model\">Cleanup model</label>
         <input id=\"cleanup-model\" autocomplete=\"off\" spellcheck=\"false\">
+      </section>
+      <section>
+        <h2>Audio</h2>
+        <label for=\"input-device\">Input device</label>
+        <input id=\"input-device\" autocomplete=\"off\" spellcheck=\"false\">
+        <label for=\"gain-db\">Microphone gain dB</label>
+        <input id=\"gain-db\" autocomplete=\"off\" spellcheck=\"false\">
+        <label><input id=\"silence-enabled\" type=\"checkbox\">Stop after silence</label>
+        <label for=\"silence-seconds\">Silence seconds</label>
+        <input id=\"silence-seconds\" autocomplete=\"off\" spellcheck=\"false\">
+        <label for=\"speech-threshold\">Speech threshold</label>
+        <input id=\"speech-threshold\" autocomplete=\"off\" spellcheck=\"false\">
       </section>
     </div>
     <div class=\"row\" style=\"margin-top: 14px; justify-content: flex-end;\">
@@ -358,6 +437,8 @@ def _page_html(token: str) -> str:
       $("transcript-pill").className = state.lastTranscriptAvailable ? "pill" : "pill off";
       $("setup-pill").textContent = state.setup?.ok ? "Speech model ready" : "Speech model not ready";
       $("setup-pill").className = state.setup?.ok ? "pill" : "pill off";
+      $("last-result").textContent = state.lastResult?.message || "";
+      $("last-result").className = state.lastResult?.ok ? "message" : "message error";
       $("runtime-button").textContent = state.runtimeEnabled ? "Turn Off" : "Turn On";
       $("runtime-button").className = state.runtimeEnabled ? "danger" : "";
       $("record-button").textContent = state.state === "RECORDING" ? "Stop Recording" : "Start Recording";
@@ -366,6 +447,12 @@ def _page_html(token: str) -> str:
       $("stt-model").value = state.sttModel;
       $("cleanup-enabled").checked = state.cleanupEnabled;
       $("cleanup-model").value = state.cleanupModel;
+      $("insertion-mode").value = state.insertionMode;
+      $("input-device").value = state.inputDeviceId;
+      $("gain-db").value = state.gainDb;
+      $("silence-enabled").checked = state.silenceEnabled;
+      $("silence-seconds").value = state.silenceSeconds;
+      $("speech-threshold").value = state.speechThreshold;
       $("settings-path").textContent = state.settingsPath;
     }};
     const refresh = async () => render(await request("/api/state"));
@@ -377,6 +464,12 @@ def _page_html(token: str) -> str:
           sttModel: $("stt-model").value,
           cleanupEnabled: $("cleanup-enabled").checked,
           cleanupModel: $("cleanup-model").value,
+          insertionMode: $("insertion-mode").value,
+          inputDeviceId: $("input-device").value,
+          gainDb: $("gain-db").value,
+          silenceEnabled: $("silence-enabled").checked,
+          silenceSeconds: $("silence-seconds").value,
+          speechThreshold: $("speech-threshold").value,
         }}));
         message("Settings saved.");
       }} catch (error) {{ message(error.message, true); }}

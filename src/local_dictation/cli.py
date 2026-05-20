@@ -5,6 +5,7 @@ import time
 import wave
 
 from .config import load_settings, save_settings
+from .config import app_data_dir, cleanup_paths, stt_model_cache_paths
 from .doctor import run_doctor
 from .insertion import insert_text
 from .logging_config import configure_logging
@@ -75,7 +76,13 @@ def _setup(args: argparse.Namespace) -> int:
         if not include_stt and not include_ollama:
             print("Choose either --stt-only or --ollama-only, not both.")
             return 2
-        status = bootstrap_setup(settings, logger=logger, include_stt=include_stt, include_ollama=include_ollama)
+        status = bootstrap_setup(
+            settings,
+            logger=logger,
+            include_stt=include_stt,
+            include_ollama=include_ollama,
+            enable_cleanup=bool(getattr(args, "enable_cleanup", False)),
+        )
     else:
         include_stt = not getattr(args, "ollama_only", False)
         include_ollama = bool(getattr(args, "with_ollama", False) or getattr(args, "ollama_only", False))
@@ -141,6 +148,26 @@ def _insert_test(args: argparse.Namespace) -> int:
     return 0 if result.inserted else 1
 
 
+def _cleanup_data(args: argparse.Namespace) -> int:
+    if not args.yes and not args.dry_run:
+        print("Refusing to remove data without --yes. Use --dry-run to preview.")
+        return 2
+
+    targets: list = []
+    if args.all or args.app_data:
+        targets.append(app_data_dir())
+    if args.all or args.models:
+        targets.extend(stt_model_cache_paths())
+    if not targets:
+        print("Choose --app-data, --models, or --all.")
+        return 2
+
+    for result in cleanup_paths(tuple(targets), dry_run=args.dry_run):
+        action = "Would remove" if args.dry_run and result.message == "would remove" else result.message.capitalize()
+        print(f"{action}: {result.path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="local-dictation")
     subparsers = parser.add_subparsers(dest="command")
@@ -164,6 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--stt-only", action="store_true", help="Prepare only the local speech-to-text model.")
     setup_parser.add_argument("--ollama-only", action="store_true", help="Prepare only the optional Ollama cleanup layer.")
     setup_parser.add_argument("--with-ollama", action="store_true", help="Include optional Ollama cleanup checks in setup status.")
+    setup_parser.add_argument("--enable-cleanup", action="store_true", help="Enable cleanup after preparing the Ollama layer.")
     setup_parser.set_defaults(func=_setup)
 
     settings_parser = subparsers.add_parser("settings", help="Open the settings window.")
@@ -179,6 +207,14 @@ def build_parser() -> argparse.ArgumentParser:
     insert_parser = subparsers.add_parser("insert-test", help="Insert test text into the current foreground window.")
     insert_parser.add_argument("--text", required=True)
     insert_parser.set_defaults(func=_insert_test)
+
+    cleanup_parser = subparsers.add_parser("cleanup-data", help="Remove Local Dictation settings, logs, and model caches.")
+    cleanup_parser.add_argument("--app-data", action="store_true", help="Remove settings and logs under APPDATA.")
+    cleanup_parser.add_argument("--models", action="store_true", help="Remove known local speech model cache directories.")
+    cleanup_parser.add_argument("--all", action="store_true", help="Remove app data and known local speech model caches.")
+    cleanup_parser.add_argument("--dry-run", action="store_true", help="Show what would be removed without deleting anything.")
+    cleanup_parser.add_argument("--yes", action="store_true", help="Confirm destructive cleanup.")
+    cleanup_parser.set_defaults(func=_cleanup_data)
 
     return parser
 

@@ -27,6 +27,15 @@ class RuntimeControlResult:
     message: str
 
 
+@dataclass(frozen=True)
+class DictationResult:
+    ok: bool
+    stage: str
+    message: str
+    inserted: bool = False
+    copied_to_clipboard: bool = False
+
+
 class DictationApp:
     def __init__(self, settings: dict, *, logger: logging.Logger | None = None) -> None:
         self.settings = settings
@@ -40,10 +49,12 @@ class DictationApp:
         self.last_transcript = ""
         self._reload_stop = threading.Event()
         self._reload_thread: threading.Thread | None = None
+        self._processing_thread: threading.Thread | None = None
         self._settings_mtime = self._current_settings_mtime()
         self._pending_hotkey_reregister = False
         self._started = False
         self._runtime_enabled = False
+        self.last_result = DictationResult(True, "idle", "Dictation is ready.")
 
     def start(self) -> None:
         with self._lock:
@@ -61,6 +72,7 @@ class DictationApp:
         self._reload_stop.set()
         with self._lock:
             recorder = self._recorder
+            processing_thread = self._processing_thread
             self._recorder = None
             self.state = AppState.IDLE
             self._runtime_enabled = False
@@ -77,6 +89,14 @@ class DictationApp:
         if self._reload_thread:
             self._reload_thread.join(timeout=2)
             self._reload_thread = None
+        if processing_thread and processing_thread is not threading.current_thread():
+            processing_thread.join(timeout=5)
+            if processing_thread.is_alive():
+                self.logger.warning("Dictation processing did not stop within timeout.")
+            else:
+                with self._lock:
+                    if self._processing_thread is processing_thread:
+                        self._processing_thread = None
         self.logger.info("Local Dictation app stopped.")
 
     def runtime_enabled(self) -> bool:
@@ -112,6 +132,17 @@ class DictationApp:
         with self._lock:
             return self.state.value
 
+    def result_payload(self) -> dict[str, object]:
+        with self._lock:
+            result = self.last_result
+        return {
+            "ok": result.ok,
+            "stage": result.stage,
+            "message": result.message,
+            "inserted": result.inserted,
+            "copiedToClipboard": result.copied_to_clipboard,
+        }
+
     def handle_hotkey(self) -> None:
         with self._lock:
             if not self._runtime_enabled:
@@ -137,13 +168,16 @@ class DictationApp:
         try:
             recorder.start()
         except RecordingError as exc:
-            self.logger.error("Recording could not start: %s", exc)
+            message = f"Recording could not start: {exc}"
+            self.logger.error(message)
+            self._set_last_result(False, "recording", message)
             self.state = AppState.IDLE
             self._target_hwnd = None
             return
 
         self._recorder = recorder
         self.state = AppState.RECORDING
+        self._set_last_result(True, "recording", "Recording started.")
         self.logger.info("Recording started. Target hwnd=%s", self._target_hwnd)
 
     def _begin_processing_locked(self, reason: str) -> None:
@@ -159,6 +193,7 @@ class DictationApp:
             name="dictation-processing",
             daemon=True,
         )
+        self._processing_thread = worker
         worker.start()
 
     def _max_duration_reached(self) -> None:
@@ -235,10 +270,30 @@ class DictationApp:
             self.logger.info("Applying deferred hotkey re-registration.")
             self._reregister_hotkey_locked()
 
+    def _set_last_result(
+        self,
+        ok: bool,
+        stage: str,
+        message: str,
+        *,
+        inserted: bool = False,
+        copied_to_clipboard: bool = False,
+    ) -> None:
+        with self._lock:
+            self.last_result = DictationResult(
+                ok,
+                stage,
+                message,
+                inserted=inserted,
+                copied_to_clipboard=copied_to_clipboard,
+            )
+
     def _process_recording(self, recorder: MicrophoneRecorder | None, target_hwnd: int | None) -> None:
         try:
             if recorder is None:
-                self.logger.warning("No recorder was available for processing.")
+                message = "No recorder was available for processing."
+                self.logger.warning(message)
+                self._set_last_result(False, "recording", message)
                 return
 
             recording = recorder.stop()
@@ -250,7 +305,9 @@ class DictationApp:
             result = self._transcriber.transcribe(recording)
             transcript = result.text.strip()
             if not transcript:
-                self.logger.warning("Transcription returned no text.")
+                message = "Transcription returned no text."
+                self.logger.warning(message)
+                self._set_last_result(False, "transcription", message)
                 return
 
             self.logger.info("Transcription completed with %d characters.", len(transcript))
@@ -262,15 +319,27 @@ class DictationApp:
                 self.settings.get("insertion", {}),
                 logger=get_logger("insertion"),
             )
+            self._set_last_result(
+                insertion.inserted,
+                "insertion",
+                insertion.message,
+                inserted=insertion.inserted,
+                copied_to_clipboard=insertion.copied_to_clipboard,
+            )
             if insertion.inserted:
                 self.logger.info(insertion.message)
             else:
                 self.logger.warning(insertion.message)
         except TranscriptionError as exc:
-            self.logger.error("Transcription failed: %s", exc)
+            message = f"Transcription failed: {exc}"
+            self.logger.error(message)
+            self._set_last_result(False, "transcription", message)
         except Exception:
             self.logger.exception("Unexpected processing failure.")
+            self._set_last_result(False, "processing", "Unexpected processing failure. See logs for details.")
         finally:
             with self._lock:
                 self.state = AppState.IDLE
+                if threading.current_thread() is self._processing_thread:
+                    self._processing_thread = None
                 self._apply_pending_hotkey_reregister_locked()

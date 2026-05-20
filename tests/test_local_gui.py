@@ -32,6 +32,15 @@ class FakeApp:
     def status_text(self) -> str:
         return self.state
 
+    def result_payload(self) -> dict[str, object]:
+        return {
+            "ok": False,
+            "stage": "insertion",
+            "message": "Could not restore target focus; final text is on the clipboard.",
+            "inserted": False,
+            "copiedToClipboard": True,
+        }
+
     def reload_settings(self, *, force: bool = False) -> None:
         self.reload_forces.append(force)
 
@@ -66,19 +75,35 @@ def local_gui_test_server(app: FakeApp):
         thread.join(timeout=2)
 
 
-def request_json(base_url: str, path: str, payload: dict | None = None, *, token: str | None = "test-token"):
+def request_json(
+    base_url: str,
+    path: str,
+    payload: dict | None = None,
+    *,
+    token: str | None = "test-token",
+    origin: str | None = None,
+):
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {}
     if payload is not None:
         headers["Content-Type"] = "application/json"
     if token is not None:
         headers["X-Local-Dictation-Token"] = token
+    if origin is not None:
+        headers["Origin"] = origin
     request = urllib.request.Request(f"{base_url}{path}", data=data, headers=headers, method="POST" if payload is not None else "GET")
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
             return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
+def request_headers(base_url: str, path: str):
+    request = urllib.request.Request(f"{base_url}{path}")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        response.read()
+        return response.status, response.headers
 
 
 def test_local_gui_uses_fixed_loopback_url():
@@ -101,8 +126,38 @@ def test_state_endpoint_returns_live_state_and_settings(monkeypatch, tmp_path):
     assert body["state"] == "IDLE"
     assert body["hotkey"] == "ctrl+alt+space"
     assert body["sttModel"] == "base.en"
+    assert body["insertionMode"] == "auto"
+    assert body["inputDeviceId"] == "default"
+    assert body["gainDb"] == 0.0
+    assert body["silenceEnabled"] is True
+    assert body["silenceSeconds"] == 1.4
+    assert body["speechThreshold"] == 0.012
     assert body["lastTranscriptAvailable"] is True
+    assert body["lastResult"] == {
+        "ok": False,
+        "stage": "insertion",
+        "message": "Could not restore target focus; final text is on the clipboard.",
+        "inserted": False,
+        "copiedToClipboard": True,
+    }
     assert body["setup"] == {"ok": False, "steps": [{"name": "STT model", "ok": False, "message": "base.en"}]}
+
+
+def test_local_gui_security_headers_are_present(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        html_status, html_headers = request_headers(base_url, "/")
+        json_status, json_headers = request_headers(base_url, "/api/state")
+
+    assert html_status == 200
+    assert json_status == 200
+    assert html_headers["X-Content-Type-Options"] == "nosniff"
+    assert json_headers["X-Content-Type-Options"] == "nosniff"
+    assert html_headers["Referrer-Policy"] == "no-referrer"
+    assert "default-src 'none'" in html_headers["Content-Security-Policy"]
 
 
 def test_setup_endpoint_returns_core_speech_model_status(monkeypatch, tmp_path):
@@ -136,6 +191,12 @@ def test_settings_endpoint_saves_and_forces_reload(monkeypatch, tmp_path):
                 "sttModel": "tiny.en",
                 "cleanupEnabled": True,
                 "cleanupModel": "llama3.2:1b",
+                "insertionMode": "clipboard",
+                "inputDeviceId": "2: USB Mic",
+                "gainDb": "6",
+                "silenceEnabled": False,
+                "silenceSeconds": "2.2",
+                "speechThreshold": "0.009",
             },
         )
 
@@ -145,6 +206,12 @@ def test_settings_endpoint_saves_and_forces_reload(monkeypatch, tmp_path):
     assert saved["hotkey"] == "ctrl+alt+space"
     assert saved["cleanup"]["enabled"] is True
     assert saved["cleanup"]["model"] == "llama3.2:1b"
+    assert saved["insertion"]["mode"] == "clipboard"
+    assert saved["recording"]["input_device_id"] == 2
+    assert saved["recording"]["gain_db"] == 6.0
+    assert saved["recording"]["silence_stop"]["enabled"] is False
+    assert saved["recording"]["silence_stop"]["silence_seconds"] == 2.2
+    assert saved["recording"]["silence_stop"]["speech_threshold"] == 0.009
     assert app.reload_forces == [True]
 
 
@@ -184,6 +251,31 @@ def test_mutation_requires_token(monkeypatch, tmp_path):
 
     assert status == 403
     assert "token" in body["error"].lower()
+
+
+def test_mutation_accepts_local_origin(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        status, body = request_json(base_url, "/api/runtime", {"enabled": False}, origin=base_url)
+
+    assert status == 200
+    assert body["runtimeEnabled"] is False
+
+
+def test_mutation_rejects_foreign_origin(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        status, body = request_json(base_url, "/api/runtime", {"enabled": False}, origin="https://example.com")
+
+    assert status == 403
+    assert "origin" in body["error"].lower()
+    assert app.runtime_enabled() is True
 
 
 def test_recording_endpoint_uses_existing_hotkey_flow(monkeypatch, tmp_path):

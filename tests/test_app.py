@@ -1,5 +1,7 @@
 from local_dictation.app import AppState, DictationApp
 from local_dictation.config import default_settings
+from local_dictation.recorder import RecordingError, RecordingResult
+from local_dictation.transcriber import TranscriptionResult
 
 
 class FakeHotkeyListener:
@@ -96,3 +98,49 @@ def test_reload_settings_force_loads_even_when_mtime_is_unchanged(monkeypatch, t
     app.reload_settings(force=True)
     assert calls == [True]
     assert app.settings["stt"]["model"] == "tiny.en"
+
+
+def test_recording_start_failure_updates_last_result(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    patch_hotkeys(monkeypatch)
+
+    class BrokenRecorder:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RecordingError("no microphone")
+
+    monkeypatch.setattr("local_dictation.app.MicrophoneRecorder", BrokenRecorder)
+    app = DictationApp(default_settings())
+    app.start()
+    app.handle_hotkey()
+    app.stop()
+
+    payload = app.result_payload()
+    assert payload["ok"] is False
+    assert payload["stage"] == "recording"
+    assert "no microphone" in payload["message"]
+
+
+def test_empty_transcription_updates_last_result(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = DictationApp(default_settings())
+
+    class FakeRecorder:
+        def stop(self):
+            return RecordingResult(audio=[], sample_rate=16000, duration_seconds=1.0)
+
+    class FakeTranscriber:
+        def transcribe(self, _recording):
+            return TranscriptionResult(text="", language="en", duration_seconds=1.0)
+
+    app.state = AppState.PROCESSING
+    app._transcriber = FakeTranscriber()
+    app._process_recording(FakeRecorder(), None)
+
+    payload = app.result_payload()
+    assert app.status_text() == "IDLE"
+    assert payload["ok"] is False
+    assert payload["stage"] == "transcription"
+    assert payload["message"] == "Transcription returned no text."

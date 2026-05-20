@@ -8,6 +8,7 @@ from pathlib import Path
 from .cleanup import check_ollama
 from .config import load_settings, logs_dir, settings_path
 from .hotkey import HotkeyError, parse_hotkey
+from .recorder import apply_gain, parse_input_device_id
 
 
 def _module_status(module: str) -> tuple[bool, str]:
@@ -16,6 +17,25 @@ def _module_status(module: str) -> tuple[bool, str]:
         return True, "imported"
     except Exception as exc:
         return False, str(exc)
+
+
+def _configured_input_device_id(settings: dict) -> int | None:
+    return parse_input_device_id(settings.get("recording", {}).get("input_device_id"))
+
+
+def _microphone_probe(sd, np, settings: dict) -> tuple[float, float]:
+    recording = settings.get("recording", {})
+    sample_rate = int(recording.get("sample_rate", 16000))
+    channels = int(recording.get("channels", 1))
+    gain_db = float(recording.get("gain_db", 0.0))
+    device_id = _configured_input_device_id(settings)
+    frame_count = max(1, int(sample_rate * 0.35))
+    audio = sd.rec(frame_count, samplerate=sample_rate, channels=channels, dtype="float32", device=device_id)
+    sd.wait()
+    adjusted = apply_gain(audio, gain_db, np_module=np)
+    rms = float(np.sqrt(np.mean(np.square(adjusted)))) if getattr(adjusted, "size", 0) else 0.0
+    peak = float(np.max(np.abs(adjusted))) if getattr(adjusted, "size", 0) else 0.0
+    return rms, peak
 
 
 def run_doctor() -> int:
@@ -77,6 +97,38 @@ def run_doctor() -> int:
 
             device = sd.query_devices(kind="input")
             lines.append(f"OK Default microphone: {device.get('name', 'unknown')}")
+            devices = sd.query_devices()
+            input_devices = [
+                (index, candidate)
+                for index, candidate in enumerate(devices)
+                if int(candidate.get("max_input_channels", 0)) > 0
+            ]
+            lines.append(f"INFO Input devices found: {len(input_devices)}")
+            for index, candidate in input_devices[:10]:
+                lines.append(
+                    "INFO Input device "
+                    f"{index}: {candidate.get('name', 'unknown')} "
+                    f"({candidate.get('max_input_channels', 0)} channels)"
+                )
+            if len(input_devices) > 10:
+                lines.append(f"INFO Input devices omitted: {len(input_devices) - 10}")
+            try:
+                configured_device = _configured_input_device_id(settings)
+                recording = settings.get("recording", {})
+                silence = recording.get("silence_stop", {})
+                lines.append(f"INFO Recording input device setting: {configured_device if configured_device is not None else 'default'}")
+                lines.append(
+                    "INFO Microphone sensitivity: "
+                    f"gain {float(recording.get('gain_db', 0.0)):g} dB, "
+                    f"speech threshold {float(silence.get('speech_threshold', 0.012)):g}"
+                )
+                if module_results.get("numpy", False):
+                    import numpy as np
+
+                    rms, peak = _microphone_probe(sd, np, settings)
+                    lines.append(f"INFO Microphone RMS probe: rms={rms:.6f}, peak={peak:.6f} after configured gain")
+            except Exception as exc:
+                lines.append(f"WARN Microphone RMS probe could not run: {exc}")
         except Exception as exc:
             ok = False
             lines.append(f"FAIL Default microphone unavailable: {exc}")

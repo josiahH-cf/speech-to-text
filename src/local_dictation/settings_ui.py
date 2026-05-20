@@ -6,13 +6,30 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from .commands import app_command
-from .config import load_settings, logs_dir, save_settings
+from .config import load_settings, logs_dir, save_settings, settings_path
 from .settings_actions import update_settings as _updated_settings
 from .startup import disable_startup, enable_startup, is_startup_enabled
 
 
 def _bool(value) -> bool:
     return bool(value)
+
+
+def _input_device_value(value) -> str:
+    return "default" if value is None else str(value)
+
+
+def _input_device_options() -> tuple[str, ...]:
+    options = ["default"]
+    try:
+        import sounddevice as sd
+
+        for index, device in enumerate(sd.query_devices()):
+            if int(device.get("max_input_channels", 0)) > 0:
+                options.append(f"{index}: {device.get('name', 'Input device')}")
+    except Exception:
+        pass
+    return tuple(options)
 
 
 class SettingsWindow:
@@ -29,6 +46,9 @@ class SettingsWindow:
         self.insertion_mode = tk.StringVar(value=self.settings.get("insertion", {}).get("mode", "auto"))
         self.startup_enabled = tk.BooleanVar(value=is_startup_enabled())
 
+        recording = self.settings.get("recording", {})
+        self.input_device_id = tk.StringVar(value=_input_device_value(recording.get("input_device_id")))
+        self.gain_db = tk.StringVar(value=str(recording.get("gain_db", 0.0)))
         silence = self.settings.get("recording", {}).get("silence_stop", {})
         self.silence_enabled = tk.BooleanVar(value=_bool(silence.get("enabled", True)))
         self.speech_threshold = tk.StringVar(value=str(silence.get("speech_threshold", 0.012)))
@@ -55,6 +75,16 @@ class SettingsWindow:
         ttk.Combobox(frame, textvariable=self.insertion_mode, values=("auto", "direct", "clipboard"), width=29).grid(
             row=row, column=1, sticky="ew", pady=4
         )
+
+        row += 1
+        ttk.Label(frame, text="Input device").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Combobox(frame, textvariable=self.input_device_id, values=_input_device_options(), width=29).grid(
+            row=row, column=1, sticky="ew", pady=4
+        )
+
+        row += 1
+        ttk.Label(frame, text="Microphone gain dB").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Entry(frame, textvariable=self.gain_db, width=32).grid(row=row, column=1, sticky="ew", pady=4)
 
         row += 1
         ttk.Checkbutton(frame, text="Stop after silence", variable=self.silence_enabled).grid(
@@ -87,9 +117,10 @@ class SettingsWindow:
         button_frame = ttk.Frame(frame)
         button_frame.grid(row=row, column=0, columnspan=2, sticky="e", pady=(14, 0))
         ttk.Button(button_frame, text="Open Logs", command=self._open_logs).grid(row=0, column=0, padx=4)
-        ttk.Button(button_frame, text="Doctor", command=self._run_doctor).grid(row=0, column=1, padx=4)
-        ttk.Button(button_frame, text="Save", command=self._save).grid(row=0, column=2, padx=4)
-        ttk.Button(button_frame, text="Close", command=self.root.destroy).grid(row=0, column=3, padx=4)
+        ttk.Button(button_frame, text="Open Settings Folder", command=self._open_settings_folder).grid(row=0, column=1, padx=4)
+        ttk.Button(button_frame, text="Doctor", command=self._run_doctor).grid(row=0, column=2, padx=4)
+        ttk.Button(button_frame, text="Save", command=self._save).grid(row=0, column=3, padx=4)
+        ttk.Button(button_frame, text="Close", command=self.root.destroy).grid(row=0, column=4, padx=4)
 
     def _save(self) -> None:
         try:
@@ -100,6 +131,8 @@ class SettingsWindow:
                 cleanup_enabled=self.cleanup_enabled.get(),
                 cleanup_model=self.cleanup_model.get(),
                 insertion_mode=self.insertion_mode.get(),
+                input_device_id=self.input_device_id.get(),
+                gain_db=self.gain_db.get(),
                 silence_enabled=self.silence_enabled.get(),
                 silence_seconds=self.silence_seconds.get(),
                 speech_threshold=self.speech_threshold.get(),
@@ -125,6 +158,10 @@ class SettingsWindow:
     def _open_logs(self) -> None:
         logs_dir().mkdir(parents=True, exist_ok=True)
         os.startfile(str(logs_dir()))  # type: ignore[attr-defined]
+
+    def _open_settings_folder(self) -> None:
+        settings_path().parent.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(settings_path().parent))  # type: ignore[attr-defined]
 
     def run(self) -> None:
         self.root.mainloop()

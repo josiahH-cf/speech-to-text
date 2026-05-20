@@ -18,6 +18,30 @@ class RecordingError(RuntimeError):
     """Raised when microphone capture fails."""
 
 
+def gain_multiplier(gain_db: float) -> float:
+    return 10 ** (float(gain_db) / 20)
+
+
+def apply_gain(audio, gain_db: float, *, np_module=None):
+    if float(gain_db) == 0:
+        return audio
+    if np_module is None:
+        import numpy as np_module
+
+    return np_module.clip(audio * gain_multiplier(gain_db), -1.0, 1.0)
+
+
+def parse_input_device_id(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text or text.lower() == "default":
+            return None
+        value = text.split(":", 1)[0].strip()
+    return int(value)
+
+
 def should_stop_for_silence(
     *,
     enabled: bool,
@@ -47,6 +71,8 @@ class MicrophoneRecorder:
         self.sample_rate = int(recording_settings.get("sample_rate", 16000))
         self.channels = int(recording_settings.get("channels", 1))
         self.max_seconds = float(recording_settings.get("max_seconds", 120))
+        self.input_device_id = parse_input_device_id(recording_settings.get("input_device_id"))
+        self.gain_db = float(recording_settings.get("gain_db", 0.0))
         silence_settings = recording_settings.get("silence_stop", {})
         self.silence_enabled = bool(silence_settings.get("enabled", True))
         self.min_recording_seconds = float(silence_settings.get("min_recording_seconds", 1.5))
@@ -76,9 +102,10 @@ class MicrophoneRecorder:
                 self.logger.warning("Microphone stream status: %s", status)
             now = time.monotonic()
             with self._lock:
-                self._frames.append(indata.copy())
+                adjusted = apply_gain(indata, self.gain_db, np_module=np)
+                self._frames.append(adjusted.copy())
                 elapsed = now - self._started_at if self._started_at else 0.0
-                rms = float(np.sqrt(np.mean(np.square(indata)))) if getattr(indata, "size", 0) else 0.0
+                rms = float(np.sqrt(np.mean(np.square(adjusted)))) if getattr(adjusted, "size", 0) else 0.0
                 if rms >= self.speech_threshold:
                     self._has_speech = True
                     self._last_speech_at = now
@@ -104,6 +131,7 @@ class MicrophoneRecorder:
                 samplerate=self.sample_rate,
                 channels=self.channels,
                 dtype="float32",
+                device=self.input_device_id,
                 callback=callback,
             )
             self._stream.start()

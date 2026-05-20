@@ -1,4 +1,26 @@
-from local_dictation.recorder import should_stop_for_silence
+import numpy as np
+
+from local_dictation.recorder import apply_gain, gain_multiplier, parse_input_device_id, should_stop_for_silence
+
+
+def test_gain_multiplier_uses_decibels():
+    assert round(gain_multiplier(6), 2) == 2.0
+
+
+def test_apply_gain_boosts_and_clips_audio():
+    audio = np.array([0.25, -0.75], dtype=np.float32)
+
+    adjusted = apply_gain(audio, 12)
+
+    assert adjusted.dtype == np.float32
+    assert adjusted[0] > audio[0]
+    assert adjusted[1] == -1.0
+
+
+def test_parse_input_device_id_accepts_default_and_numeric_labels():
+    assert parse_input_device_id(None) is None
+    assert parse_input_device_id("default") is None
+    assert parse_input_device_id("3: USB Microphone") == 3
 
 
 def test_silence_stop_requires_speech_and_minimum_duration():

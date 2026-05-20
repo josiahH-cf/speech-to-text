@@ -6,6 +6,8 @@ from typing import Any
 from .hotkey import parse_hotkey
 
 VALID_INSERTION_MODES = {"auto", "direct", "typing", "clipboard"}
+MIN_GAIN_DB = -12.0
+MAX_GAIN_DB = 24.0
 
 
 def required_text(value: str, field_name: str) -> str:
@@ -25,6 +27,33 @@ def positive_float(value: str, field_name: str) -> float:
         raise ValueError(f"{field_name} must be a number.") from None
     if parsed <= 0:
         raise ValueError(f"{field_name} must be greater than 0.")
+    return parsed
+
+
+def float_in_range(value: str, field_name: str, minimum: float, maximum: float) -> float:
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{field_name} is required.")
+    try:
+        parsed = float(text)
+    except ValueError:
+        raise ValueError(f"{field_name} must be a number.") from None
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{field_name} must be between {minimum:g} and {maximum:g}.")
+    return parsed
+
+
+def optional_device_id(value: str, field_name: str = "Input device") -> int | None:
+    text = value.strip()
+    if not text or text.lower() == "default":
+        return None
+    device_text = text.split(":", 1)[0].strip()
+    try:
+        parsed = int(device_text)
+    except ValueError:
+        raise ValueError(f"{field_name} must be default or a numeric device id.") from None
+    if parsed < 0:
+        raise ValueError(f"{field_name} must be default or a non-negative device id.")
     return parsed
 
 
@@ -53,6 +82,8 @@ def update_settings(
     cleanup_enabled: bool,
     cleanup_model: str,
     insertion_mode: str,
+    input_device_id: str = "default",
+    gain_db: str = "0",
     silence_enabled: bool,
     silence_seconds: str,
     speech_threshold: str,
@@ -70,7 +101,10 @@ def update_settings(
         raise ValueError("Insertion mode must be auto, direct, typing, or clipboard.")
 
     updated.setdefault("insertion", {})["mode"] = normalized_insertion_mode
-    silence = updated.setdefault("recording", {}).setdefault("silence_stop", {})
+    recording = updated.setdefault("recording", {})
+    recording["input_device_id"] = optional_device_id(input_device_id)
+    recording["gain_db"] = float_in_range(gain_db, "Microphone gain", MIN_GAIN_DB, MAX_GAIN_DB)
+    silence = recording.setdefault("silence_stop", {})
     silence["enabled"] = bool(silence_enabled)
     silence["silence_seconds"] = positive_float(silence_seconds, "Silence seconds")
     silence["speech_threshold"] = positive_float(speech_threshold, "Speech threshold")

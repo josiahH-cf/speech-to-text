@@ -1,4 +1,4 @@
-from local_dictation.config import DEFAULT_SETTINGS, deep_merge, load_settings, migrate_settings
+from local_dictation.config import DEFAULT_SETTINGS, cleanup_paths, deep_merge, load_settings, migrate_settings, stt_model_cache_paths
 
 
 def test_default_settings_are_created(tmp_path):
@@ -9,6 +9,8 @@ def test_default_settings_are_created(tmp_path):
     assert settings["hotkey"] == "ctrl+alt+space"
     assert settings["stt"]["engine"] == "faster-whisper"
     assert settings["insertion"]["mode"] == "auto"
+    assert settings["recording"]["input_device_id"] is None
+    assert settings["recording"]["gain_db"] == 0.0
     assert settings["recording"]["silence_stop"]["enabled"] is True
     assert settings["setup"]["ollama_install"] == "auto"
 
@@ -34,3 +36,28 @@ def test_migrate_v1_clipboard_default_to_auto():
 
     assert migrated["config_version"] == 2
     assert migrated["insertion"]["mode"] == "auto"
+
+
+def test_stt_model_cache_paths_use_huggingface_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+
+    paths = stt_model_cache_paths(("base.en",))
+
+    assert paths == (
+        tmp_path / "hf" / "hub" / "models--Systran--faster-whisper-base.en",
+        tmp_path / "hf" / "hub" / ".locks" / "models--Systran--faster-whisper-base.en",
+    )
+
+
+def test_cleanup_paths_removes_existing_files_and_directories(tmp_path):
+    directory = tmp_path / "appdata"
+    file_path = tmp_path / "cache.lock"
+    directory.mkdir()
+    (directory / "settings.json").write_text("{}", encoding="utf-8")
+    file_path.write_text("locked", encoding="utf-8")
+
+    results = cleanup_paths((directory, file_path, tmp_path / "missing"))
+
+    assert [result.removed for result in results] == [True, True, False]
+    assert not directory.exists()
+    assert not file_path.exists()

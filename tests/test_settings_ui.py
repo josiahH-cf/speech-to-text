@@ -14,6 +14,8 @@ def test_updated_settings_normalizes_and_preserves_original_settings():
         cleanup_enabled=True,
         cleanup_model="gemma3:1b",
         insertion_mode="DIRECT",
+        input_device_id="default",
+        gain_db="3",
         silence_enabled=False,
         silence_seconds="2.5",
         speech_threshold="0.02",
@@ -24,6 +26,8 @@ def test_updated_settings_normalizes_and_preserves_original_settings():
     assert updated["stt"]["model"] == "tiny.en"
     assert updated["cleanup"]["enabled"] is True
     assert updated["insertion"]["mode"] == "direct"
+    assert updated["recording"]["input_device_id"] is None
+    assert updated["recording"]["gain_db"] == 3.0
     assert updated["recording"]["silence_stop"]["enabled"] is False
     assert updated["recording"]["silence_stop"]["silence_seconds"] == 2.5
     assert updated["recording"]["silence_stop"]["speech_threshold"] == 0.02

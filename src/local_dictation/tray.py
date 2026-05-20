@@ -47,6 +47,9 @@ def run_tray(settings: dict) -> None:
     def status_item(_item):
         return f"Status: {app.status_text()}"
 
+    def last_result_item(_item):
+        return f"Last result: {app.result_payload().get('message', 'Dictation is ready.')}"
+
     def toggle_recording(_icon, _item):
         app.handle_hotkey()
 
@@ -60,6 +63,10 @@ def run_tray(settings: dict) -> None:
     def open_logs(_icon, _item):
         logs_dir().mkdir(parents=True, exist_ok=True)
         _open_path(logs_dir())
+
+    def open_settings_folder(_icon, _item):
+        settings_path().parent.mkdir(parents=True, exist_ok=True)
+        _open_path(settings_path().parent)
 
     def run_doctor(_icon, _item):
         _run_doctor()
@@ -78,8 +85,10 @@ def run_tray(settings: dict) -> None:
 
     menu = pystray.Menu(
         pystray.MenuItem(status_item, None, enabled=False),
+        pystray.MenuItem(last_result_item, None, enabled=False),
         pystray.MenuItem("Start/Stop Recording", toggle_recording),
         pystray.MenuItem("Settings", open_settings),
+        pystray.MenuItem("Open Settings Folder", open_settings_folder),
         pystray.MenuItem("Open Localhost GUI", open_local_gui),
         pystray.MenuItem("Reload Settings", reload_settings),
         pystray.MenuItem("Copy Last Transcript", copy_last_transcript, enabled=lambda _item: bool(app.last_transcript)),
