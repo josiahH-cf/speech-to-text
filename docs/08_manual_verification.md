@@ -34,6 +34,12 @@ Notes:
 - Start Menu shortcut targets were verified: app uses `LocalDictation.exe run`, settings uses `LocalDictation.exe settings`, and doctor uses `LocalDictationCLI.exe doctor`.
 - `LocalDictation.exe settings` launched a resident settings process and was then stopped cleanly.
 - Installed `LocalDictationCLI.exe startup enable` wrote the HKCU `LocalDictation` Run entry pointing to installed `LocalDictation.exe run`; `startup disable` removed it.
+- 2026-05-20 verification rebuilt `dist\LocalDictation` and `dist\installer\LocalDictationSetup-0.2.0.exe` after script cwd hardening.
+- `scripts\build-installer.ps1 -SkipInstaller` succeeded when invoked by full path from `$env:TEMP` and rebuilt `dist\LocalDictation`.
+- Silent installer validation with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=""` exited `0` and installed both packaged launchers to `%LOCALAPPDATA%\Programs\LocalDictation`.
+- Installed `LocalDictationCLI.exe doctor` and `LocalDictationCLI.exe setup status` exited `0` after the silent install.
+- Installed `LocalDictationCLI.exe startup enable` wrote the HKCU Run command for installed `LocalDictation.exe run`; `startup disable` removed it.
+- Installed `LocalDictation.exe run` stayed resident for a bounded launch check and logged successful hotkey registration before being stopped.
 
 ## Dictation Targets
 
@@ -67,4 +73,6 @@ Notes:
 - `LocalDictationCLI.exe transcribe-file` loaded `base.en` and exited `0` against a generated silent WAV smoke file.
 - Installed `LocalDictationCLI.exe setup bootstrap` completed successfully during independent verification with the configured STT model ready and Ollama reachable.
 - With cleanup temporarily enabled and pointed at an unreachable local endpoint with a 1-second timeout, installed dictation still inserted the raw transcript and logged `Ollama cleanup failed; using raw transcript`; settings were restored afterward.
+- 2026-05-20 source `scripts\install.ps1`, `scripts\doctor.ps1`, and `scripts\smoke-test.ps1` exited `0` when invoked by full path from `$env:TEMP`; no `.venv` was created in the caller's temp directory.
+- 2026-05-20 packaged `LocalDictationCLI.exe doctor` and `setup status` exited `0`; setup status reported STT model ready, winget available, Ollama executable available, and Ollama API reachable.
 - End-to-end live dictation into dedicated Notepad, browser, and editor fields still requires interactive target testing.

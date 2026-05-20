@@ -38,13 +38,18 @@ It creates Start Menu shortcuts for the app, settings, and doctor. During setup,
 Open PowerShell in this repo and run:
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e .[dev]
+.\scripts\install.ps1
 ```
 
-If PowerShell blocks activation scripts, run:
+The install script creates `.venv` with Python 3.12, upgrades pip, and installs the app in editable mode with developer test dependencies. It can also be invoked by full path from another working directory.
+
+The script does not require activating the virtual environment. To run commands directly, use the environment Python:
+
+```powershell
+.\.venv\Scripts\python.exe -m local_dictation doctor
+```
+
+If you prefer to activate the environment manually and PowerShell blocks activation scripts, run:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
@@ -117,7 +122,7 @@ For better quality on stronger hardware, try:
 ## Run
 
 ```powershell
-python -m local_dictation run
+.\scripts\run.ps1
 ```
 
 The app appears in the system tray. Default hotkey:
@@ -137,7 +142,7 @@ Workflow:
 For console debugging without the tray:
 
 ```powershell
-python -m local_dictation run --no-tray
+.\.venv\Scripts\python.exe -m local_dictation run --no-tray
 ```
 
 Packaged app commands:
@@ -247,13 +252,13 @@ This uses the current user's Windows Run registry entry and does not require adm
 Run automated tests:
 
 ```powershell
-python -m pytest
+.\.venv\Scripts\python.exe -m pytest
 ```
 
 Run setup diagnostics:
 
 ```powershell
-python -m local_dictation doctor
+.\scripts\doctor.ps1
 ```
 
 Run the scripted smoke checklist:
