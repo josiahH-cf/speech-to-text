@@ -94,38 +94,58 @@ def run_command(command: Sequence[str], timeout_seconds: int = 900) -> tuple[boo
     return False, output or f"exit code {completed.returncode}"
 
 
-def collect_setup_status(settings: dict | None = None) -> SetupStatus:
+def collect_setup_status(
+    settings: dict | None = None,
+    *,
+    include_stt: bool = True,
+    include_ollama: bool = False,
+) -> SetupStatus:
     settings = settings or load_settings(create=True)
     setup = settings.get("setup", {})
     cleanup = settings.get("cleanup", {})
-    steps = [
-        SetupStep("STT model", bool(setup.get("stt_model_ready", False)), settings.get("stt", {}).get("model", "base.en")),
-        SetupStep("winget", command_available("winget"), "available" if command_available("winget") else "not found"),
-        SetupStep("Ollama executable", command_available("ollama"), "available" if command_available("ollama") else "not found"),
-    ]
-    if cleanup.get("enabled", False) or setup.get("ollama_install") == "auto":
+    steps: list[SetupStep] = []
+    if include_stt:
+        steps.append(
+            SetupStep("STT model", bool(setup.get("stt_model_ready", False)), settings.get("stt", {}).get("model", "base.en"))
+        )
+    if include_ollama:
+        steps.extend(
+            [
+                SetupStep("winget", command_available("winget"), "available" if command_available("winget") else "not found"),
+                SetupStep(
+                    "Ollama executable", command_available("ollama"), "available" if command_available("ollama") else "not found"
+                ),
+            ]
+        )
         reachable, message = check_ollama(cleanup.get("endpoint", "http://localhost:11434/api/generate"), timeout_seconds=2)
         steps.append(SetupStep("Ollama API", reachable, message))
     return SetupStatus(tuple(steps))
 
 
-def bootstrap_setup(settings: dict | None = None, *, logger=None) -> SetupStatus:
+def bootstrap_setup(
+    settings: dict | None = None,
+    *,
+    logger=None,
+    include_stt: bool = True,
+    include_ollama: bool = True,
+) -> SetupStatus:
     settings = settings or load_settings(create=True)
     setup = settings.setdefault("setup", {})
     steps: list[SetupStep] = []
 
-    try:
-        transcriber = FasterWhisperTranscriber(settings.get("stt", {}), logger=logger)
-        transcriber.download_model()
-        setup["stt_model_ready"] = True
-        steps.append(SetupStep("STT model", True, f"{settings.get('stt', {}).get('model', 'base.en')} is ready"))
-    except Exception as exc:
-        setup["stt_model_ready"] = False
-        steps.append(SetupStep("STT model", False, str(exc)))
+    if include_stt:
+        try:
+            transcriber = FasterWhisperTranscriber(settings.get("stt", {}), logger=logger)
+            transcriber.download_model()
+            setup["stt_model_ready"] = True
+            steps.append(SetupStep("STT model", True, f"{settings.get('stt', {}).get('model', 'base.en')} is ready"))
+        except Exception as exc:
+            setup["stt_model_ready"] = False
+            steps.append(SetupStep("STT model", False, str(exc)))
 
     cleanup = settings.setdefault("cleanup", {})
     ollama_mode = setup.get("ollama_install", "auto")
-    if ollama_mode == "auto":
+    if include_ollama and ollama_mode == "auto":
         if not command_available("ollama"):
             if command_available("winget"):
                 ok, message = run_command(winget_install_ollama_command())
@@ -146,7 +166,7 @@ def bootstrap_setup(settings: dict | None = None, *, logger=None) -> SetupStatus
             steps.append(SetupStep("Ollama model", ok, message or model))
         else:
             setup["ollama_ready"] = False
-    else:
+    elif include_ollama:
         steps.append(SetupStep("Ollama", True, f"install mode is {ollama_mode}"))
 
     setup["last_bootstrap_status"] = {

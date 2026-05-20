@@ -8,6 +8,7 @@ from .app import DictationApp
 from .commands import app_command
 from .config import logs_dir, settings_path
 from .insertion import set_clipboard_text
+from .local_gui import LocalGuiServer
 from .logging_config import configure_logging
 
 
@@ -40,6 +41,8 @@ def run_tray(settings: dict) -> None:
     logger = configure_logging(settings)
     app = DictationApp(settings, logger=logger)
     app.start()
+    local_gui = LocalGuiServer(app, logger=logger)
+    local_gui.start()
 
     def status_item(_item):
         return f"Status: {app.status_text()}"
@@ -49,6 +52,10 @@ def run_tray(settings: dict) -> None:
 
     def open_settings(_icon, _item):
         subprocess.Popen(app_command("settings"))
+
+    def open_local_gui(_icon, _item):
+        if local_gui.start():
+            local_gui.open_browser()
 
     def open_logs(_icon, _item):
         logs_dir().mkdir(parents=True, exist_ok=True)
@@ -65,6 +72,7 @@ def run_tray(settings: dict) -> None:
         app.reload_settings()
 
     def quit_app(icon, _item):
+        local_gui.stop()
         app.stop()
         icon.stop()
 
@@ -72,6 +80,7 @@ def run_tray(settings: dict) -> None:
         pystray.MenuItem(status_item, None, enabled=False),
         pystray.MenuItem("Start/Stop Recording", toggle_recording),
         pystray.MenuItem("Settings", open_settings),
+        pystray.MenuItem("Open Localhost GUI", open_local_gui),
         pystray.MenuItem("Reload Settings", reload_settings),
         pystray.MenuItem("Copy Last Transcript", copy_last_transcript, enabled=lambda _item: bool(app.last_transcript)),
         pystray.MenuItem("Open Logs", open_logs),
@@ -83,4 +92,5 @@ def run_tray(settings: dict) -> None:
     try:
         icon.run()
     finally:
+        local_gui.stop()
         app.stop()

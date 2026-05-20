@@ -61,3 +61,23 @@ Reasoning:
 - The installed app should run without an activated Python environment.
 - Per-user install avoids administrator rights for the core app.
 - Inno Setup is a maintained Windows installer builder and is available through winget.
+
+## Decision 8: Core-First Setup
+
+Prepare the local speech-to-text model separately from optional Ollama cleanup setup.
+
+Reasoning:
+- Raw local dictation is the core product path and should not report failure only because optional cleanup is absent.
+- Ollama installation and model pulls can take longer, require more dependencies, and are not needed for useful transcription.
+- Setup commands can still prepare both layers, but installer defaults and setup status should keep the core path clear.
+
+## Decision 9: Embedded Local Control UI
+
+Host the browser control UI inside the existing resident app process at `http://127.0.0.1:8765/`.
+
+Reasoning:
+- `LocalDictation.exe run` already owns the tray icon, global hotkey, settings reload loop, and dictation runtime.
+- Keeping the localhost UI in that same process avoids a second daemon, service registration, or separate IPC layer.
+- The fixed loopback address gives users and support docs one stable place to open the standard UI.
+- Runtime off means dictation listening is disabled; it does not quit the tray process or disable startup-on-login.
+- The control UI should write the existing settings file and call the existing runtime seams rather than creating parallel configuration paths.

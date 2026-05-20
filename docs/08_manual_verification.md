@@ -2,6 +2,13 @@
 
 Record results here before marking v0.2 complete.
 
+## Current Manual Gaps
+
+- Dedicated Notepad, browser text field, and editor text field dictation targets.
+- Clipboard preservation after direct typing and recoverable clipboard fallback after insertion failure.
+- Elevated or protected target fail-safe behavior.
+- Local browser UI tray launch, command launch, runtime controls, settings save, setup readiness display, shutdown behavior, and occupied-port behavior.
+
 ## Environment
 
 - Windows version: Windows 11 local verification host
@@ -20,7 +27,7 @@ Record results here before marking v0.2 complete.
 - [x] Uninstall removes app files.
 - [x] Installed app launches without immediately exiting.
 
-Notes:
+History Notes:
 - Silent install with optional tasks disabled installed to `%LOCALAPPDATA%\Programs\LocalDictation`.
 - Installed `LocalDictationCLI.exe doctor` exited `0` after the console/GUI executable split.
 - Installed `LocalDictation.exe run` started successfully and was stopped after a resident-app launch check.
@@ -40,6 +47,13 @@ Notes:
 - Installed `LocalDictationCLI.exe doctor` and `LocalDictationCLI.exe setup status` exited `0` after the silent install.
 - Installed `LocalDictationCLI.exe startup enable` wrote the HKCU Run command for installed `LocalDictation.exe run`; `startup disable` removed it.
 - Installed `LocalDictation.exe run` stayed resident for a bounded launch check and logged successful hotkey registration before being stopped.
+- 2026-05-20 rebuilt `dist\LocalDictation` and `dist\installer\LocalDictationSetup-0.2.0.exe` after splitting core STT setup from optional Ollama setup.
+- Silent reinstall with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=""` exited `0` and installed both packaged launchers.
+- Packaged `LocalDictationCLI.exe setup --help` exposed `--stt-only`, `--ollama-only`, and `--with-ollama`.
+- Packaged `LocalDictationCLI.exe setup status` exited `0` and reported only core STT model readiness by default.
+- Packaged `LocalDictationCLI.exe setup status --with-ollama` and `setup status --ollama-only` exited `0` with winget, Ollama executable, and Ollama API checks passing on the verification host.
+- Installer log for `/TASKS="bootstrap"` showed `LocalDictationCLI.exe setup bootstrap --stt-only` with process exit code `0`.
+- Installer log for `/TASKS="ollama"` showed `LocalDictationCLI.exe setup bootstrap --ollama-only` with process exit code `0`.
 
 ## Dictation Targets
 
@@ -52,7 +66,7 @@ Notes:
 - [ ] Clipboard fallback leaves recoverable text if direct typing fails.
 - [ ] Elevated/protected target fails safe without inserting into the wrong place.
 
-Notes:
+History Notes:
 - Installed `LocalDictationCLI.exe insert-test --text "Local Dictation insert test"` inserted text into a focused Windows Forms text box with exit code `0`.
 - Installed `LocalDictation.exe run` registered `ctrl+alt+space`, captured the default microphone, transcribed the spoken phrase "this is a local dictation smoke test", and inserted `This is a local dictation smoke test.` with direct Unicode typing.
 - Log evidence for the installed smoke test: hotkey registered, recording started, silence requested stop after 6.83 seconds, `base.en` loaded, transcription completed with 37 characters, and direct Unicode typing inserted the text.
@@ -67,7 +81,7 @@ Notes:
 - [x] `LocalDictationCLI.exe transcribe-file` loads `base.en` and exits `0` on a local WAV smoke file.
 - [x] Cleanup enabled with unreachable Ollama endpoint fails open to raw transcript.
 
-Notes:
+History Notes:
 - Bootstrap installed/detected Ollama through winget and prepared the configured cleanup model.
 - `LocalDictationCLI.exe setup status` reports STT model ready, winget available, Ollama executable available, and Ollama API reachable.
 - `LocalDictationCLI.exe transcribe-file` loaded `base.en` and exited `0` against a generated silent WAV smoke file.
@@ -76,3 +90,22 @@ Notes:
 - 2026-05-20 source `scripts\install.ps1`, `scripts\doctor.ps1`, and `scripts\smoke-test.ps1` exited `0` when invoked by full path from `$env:TEMP`; no `.venv` was created in the caller's temp directory.
 - 2026-05-20 packaged `LocalDictationCLI.exe doctor` and `setup status` exited `0`; setup status reported STT model ready, winget available, Ollama executable available, and Ollama API reachable.
 - End-to-end live dictation into dedicated Notepad, browser, and editor fields still requires interactive target testing.
+
+## Local Browser UI
+
+- [ ] Tray menu opens `http://127.0.0.1:8765/` in the default browser.
+- [ ] `LocalDictation.exe gui` opens `http://127.0.0.1:8765/` without starting another server process.
+- [ ] Browser UI shows runtime enabled/off, current pipeline state, last transcript availability, and settings path.
+- [ ] Browser UI shows core speech-model readiness.
+- [ ] Hotkey binding change saves, normalizes, and re-registers when the app is idle.
+- [ ] STT model change saves and the next recording uses a rebuilt transcriber.
+- [ ] Cleanup enabled toggle and cleanup model field save to `%APPDATA%\LocalDictation\settings.json`.
+- [ ] Runtime Off disables dictation listening without quitting the tray process or localhost UI.
+- [ ] Runtime On re-enables hotkey dictation from the browser UI.
+- [ ] Browser Start/Stop Recording uses the same runtime path as the global hotkey.
+- [ ] Quit from the tray stops the localhost server; `http://127.0.0.1:8765/` no longer responds afterward.
+- [ ] If port `8765` is already occupied, tray dictation still starts and logs that the browser UI could not bind.
+
+History Notes:
+- The localhost UI is hosted by `LocalDictation.exe run`; it is not a Windows service or separate daemon.
+- Runtime Off, tray Quit, and startup-on-login remain separate controls.

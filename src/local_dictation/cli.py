@@ -70,9 +70,16 @@ def _setup(args: argparse.Namespace) -> int:
     settings = load_settings(create=True)
     logger = configure_logging(settings, console=True)
     if args.action == "bootstrap":
-        status = bootstrap_setup(settings, logger=logger)
+        include_stt = not getattr(args, "ollama_only", False)
+        include_ollama = not getattr(args, "stt_only", False)
+        if not include_stt and not include_ollama:
+            print("Choose either --stt-only or --ollama-only, not both.")
+            return 2
+        status = bootstrap_setup(settings, logger=logger, include_stt=include_stt, include_ollama=include_ollama)
     else:
-        status = collect_setup_status(settings)
+        include_stt = not getattr(args, "ollama_only", False)
+        include_ollama = bool(getattr(args, "with_ollama", False) or getattr(args, "ollama_only", False))
+        status = collect_setup_status(settings, include_stt=include_stt, include_ollama=include_ollama)
     print(status.render())
     return 0 if status.ok else 1
 
@@ -81,6 +88,16 @@ def _settings(_args: argparse.Namespace) -> int:
     from .settings_ui import run_settings_window
 
     run_settings_window()
+    return 0
+
+
+def _gui(_args: argparse.Namespace) -> int:
+    import webbrowser
+
+    from .local_gui import LOCAL_GUI_URL
+
+    webbrowser.open(LOCAL_GUI_URL)
+    print(f"Opened {LOCAL_GUI_URL}")
     return 0
 
 
@@ -144,10 +161,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup_parser = subparsers.add_parser("setup", help="Run or inspect first-run setup.")
     setup_parser.add_argument("action", choices=["bootstrap", "status"])
+    setup_parser.add_argument("--stt-only", action="store_true", help="Prepare only the local speech-to-text model.")
+    setup_parser.add_argument("--ollama-only", action="store_true", help="Prepare only the optional Ollama cleanup layer.")
+    setup_parser.add_argument("--with-ollama", action="store_true", help="Include optional Ollama cleanup checks in setup status.")
     setup_parser.set_defaults(func=_setup)
 
     settings_parser = subparsers.add_parser("settings", help="Open the settings window.")
     settings_parser.set_defaults(func=_settings)
+
+    gui_parser = subparsers.add_parser("gui", help="Open the local browser UI.")
+    gui_parser.set_defaults(func=_gui)
 
     transcribe_parser = subparsers.add_parser("transcribe-file", help="Transcribe a local WAV file.")
     transcribe_parser.add_argument("wav")

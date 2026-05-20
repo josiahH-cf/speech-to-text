@@ -4,7 +4,7 @@ Minimal Windows 11 local dictation tray app.
 
 Press a global hotkey, speak into the default microphone, press the hotkey again, and the app transcribes locally with `faster-whisper`. Optional cleanup can run through a local Ollama model. The final text is typed into the window that was focused when recording started, with clipboard paste as a fallback.
 
-## What It Builds
+## What It Does
 
 - Resident tray app.
 - Configurable global hotkey.
@@ -12,14 +12,25 @@ Press a global hotkey, speak into the default microphone, press the hotkey again
 - Local `faster-whisper` transcription.
 - Optional Ollama cleanup at `http://localhost:11434`.
 - Direct Unicode typing into the previous target window, with clipboard paste fallback.
+- Local browser control UI at `http://127.0.0.1:8765/`.
 - Current-user startup integration.
 - Settings and logs under `%APPDATA%\LocalDictation`.
+
+## Quick Start For End Users
+
+1. Run the installer.
+2. Leave `Prepare speech model after install` checked.
+3. Launch Local Dictation from the Start Menu.
+4. Open `Open Localhost GUI` from the tray menu if you want to check runtime, settings, or speech-model readiness.
+5. Put your cursor in a text field, press `Ctrl+Alt+Space`, speak, then press `Ctrl+Alt+Space` again.
+
+Ollama cleanup is optional. The app should remain useful with only the speech model prepared.
 
 ## Install
 
 ### User Install From Built Installer
 
-After building the installer, run:
+Run the installer file you received or built:
 
 ```powershell
 .\dist\installer\LocalDictationSetup-0.2.0.exe
@@ -31,7 +42,19 @@ The installer is per-user and installs to:
 %LOCALAPPDATA%\Programs\LocalDictation
 ```
 
-It creates Start Menu shortcuts for the app, settings, and doctor. During setup, the optional bootstrap step prepares the speech model and can install Ollama through winget.
+It creates Start Menu shortcuts for the app, settings, and doctor. During setup, the checked setup task prepares the speech model. A separate unchecked task can prepare the optional Ollama cleanup model.
+
+For near-unattended installs, keep the app install separate from setup choices:
+
+```powershell
+.\dist\installer\LocalDictationSetup-0.2.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=""
+```
+
+Then prepare the speech model when ready:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\LocalDictation\LocalDictationCLI.exe" setup bootstrap --stt-only
+```
 
 ### Developer Install From Source
 
@@ -83,23 +106,44 @@ dist\LocalDictation\LocalDictationCLI.exe
 dist\installer\LocalDictationSetup-0.2.0.exe
 ```
 
+`LocalDictation.exe` is the windowed app entry for the tray and settings. `LocalDictationCLI.exe` is the console entry for diagnostics, setup, and test commands.
+
 ## Prepare The STT Model
 
 The first model download needs internet. Transcription after the model is cached is local.
+
+For the packaged app:
+
+```powershell
+LocalDictationCLI.exe setup bootstrap --stt-only
+LocalDictationCLI.exe setup status
+```
+
+For the source install:
+
+```powershell
+python -m local_dictation setup bootstrap --stt-only
+python -m local_dictation setup status
+```
+
+The older direct model command still works for source installs:
 
 ```powershell
 python -m local_dictation download-model
 ```
 
-For the packaged app:
-
-```powershell
-LocalDictationCLI.exe setup bootstrap
-```
-
 Default model: `base.en`.
 
-For a faster but lower-quality model, edit `%APPDATA%\LocalDictation\settings.json` and set:
+Speech model choices in Settings:
+
+| Model | Best fit | Tradeoff |
+| --- | --- | --- |
+| `tiny.en` | Fastest, lightest local transcription | Lower accuracy |
+| `base.en` | Default balanced choice | Good first choice for most users |
+| `small.en` | Better quality on stronger hardware | Slower and heavier |
+| `medium.en` | Highest listed quality option | Heaviest listed option |
+
+For a faster but lower-quality model, choose `tiny.en` in Settings or edit `%APPDATA%\LocalDictation\settings.json` and set:
 
 ```json
 {
@@ -109,7 +153,7 @@ For a faster but lower-quality model, edit `%APPDATA%\LocalDictation\settings.js
 }
 ```
 
-For better quality on stronger hardware, try:
+For better quality on stronger hardware, choose `small.en` or edit:
 
 ```json
 {
@@ -145,14 +189,31 @@ For console debugging without the tray:
 .\.venv\Scripts\python.exe -m local_dictation run --no-tray
 ```
 
+The tray app also starts a local browser UI at:
+
+```text
+http://127.0.0.1:8765/
+```
+
+Use the tray menu item `Open Localhost GUI` to open it. The browser UI runs inside the same resident app process as the tray icon. It shows runtime state, last transcript availability, settings path, and whether the core speech model is ready. Turning runtime off in the browser disables dictation listening and hotkey recording, but it does not quit the tray process or disable startup-on-login. If port `8765` is already in use, dictation still runs from the tray and hotkey, but the browser UI is unavailable until the port is free.
+
+You can also open the same browser UI from the command line after the tray app is running:
+
+```powershell
+python -m local_dictation gui
+```
+
 Packaged app commands:
 
 ```powershell
 LocalDictation.exe run
 LocalDictation.exe settings
+LocalDictation.exe gui
 LocalDictationCLI.exe doctor
-LocalDictationCLI.exe setup bootstrap
+LocalDictationCLI.exe setup bootstrap --stt-only
+LocalDictationCLI.exe setup bootstrap --ollama-only
 LocalDictationCLI.exe setup status
+LocalDictationCLI.exe setup status --with-ollama
 LocalDictationCLI.exe transcribe-file sample.wav
 LocalDictationCLI.exe insert-test --text "Local Dictation insert test"
 ```
@@ -202,11 +263,16 @@ Settings can also be edited from the tray menu. Safe changes are reloaded by the
 
 ## Optional Ollama Cleanup
 
-Bootstrap can install Ollama through winget and pull the configured local model:
+Ollama cleanup is separate from local speech-to-text. It is disabled by default, and the app uses the raw transcript if Ollama is unavailable.
+
+To prepare the optional cleanup layer, bootstrap can install Ollama through winget and pull the configured local model:
 
 ```powershell
-python -m local_dictation setup bootstrap
+python -m local_dictation setup bootstrap --ollama-only
+python -m local_dictation setup status --ollama-only
 ```
+
+For the packaged app, use `LocalDictationCLI.exe` with the same arguments.
 
 Enable cleanup in settings:
 
@@ -261,6 +327,18 @@ Run setup diagnostics:
 .\scripts\doctor.ps1
 ```
 
+Check core speech setup:
+
+```powershell
+python -m local_dictation setup status
+```
+
+Include optional Ollama cleanup checks only when you are using cleanup:
+
+```powershell
+python -m local_dictation setup status --with-ollama
+```
+
 Run the scripted smoke checklist:
 
 ```powershell
@@ -279,6 +357,28 @@ Manual smoke test:
 
 Repeat in a browser text box and an editor field.
 
+## Update
+
+Local Dictation does not self-update. To update an installed copy:
+
+1. Quit Local Dictation from the tray menu.
+2. Run the newer installer.
+3. Keep the same per-user install location.
+4. Launch Local Dictation again from the Start Menu.
+5. Open the browser UI and confirm the speech model shows ready.
+
+Settings and logs stay under:
+
+```text
+%APPDATA%\LocalDictation
+```
+
+If speech-model setup is not ready after the update, run setup from the installed command line:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\LocalDictation\LocalDictationCLI.exe" setup bootstrap --stt-only
+```
+
 ## Logs
 
 Logs are written here:
@@ -289,20 +389,35 @@ Logs are written here:
 
 The tray menu includes `Open Logs`.
 
+## Uninstall And Reset
+
+Uninstall from Windows Settings, or run the uninstaller created by the per-user installer.
+
+To reset app settings, close Local Dictation and rename or delete:
+
+```text
+%APPDATA%\LocalDictation\settings.json
+```
+
+The app creates default settings on the next run. Logs and downloaded model caches are not reset by deleting this file.
+
 ## Troubleshooting
 
-- Hotkey does nothing: run `python -m local_dictation doctor`; another app may own the hotkey. Change `hotkey` in settings.
+For a packaged install, use `LocalDictationCLI.exe` with the same arguments shown in the `python -m local_dictation ...` examples.
+
+- Hotkey does nothing: run `python -m local_dictation doctor`; another app may own the hotkey. Change the hotkey in Settings.
 - No microphone: check Windows privacy settings, default input device, and the `doctor` output.
-- First transcription is slow: the model may be downloading or loading. Use `tiny.en` for faster startup.
-- Cleanup does not run: confirm Ollama is installed, running, and has the configured model pulled.
+- First transcription is slow: the speech model may be downloading or loading. Use `tiny.en` for the lightest listed model.
+- Setup status fails: run `python -m local_dictation setup bootstrap --stt-only` for the core speech model, then retry `setup status`.
+- Cleanup does not run: confirm cleanup is enabled, then run `python -m local_dictation setup status --with-ollama` to check Ollama separately.
 - Text does not appear: the target may block focus restoration or simulated input. The final text should remain on the clipboard.
 - Elevated target app does not accept input: the app detects likely integrity-level blocking and leaves the final text recoverable instead of blindly inserting into another target.
 - `Application Control policy has blocked this file`: Windows security policy blocked a native dependency such as `tokenizers`. Run `python -m local_dictation doctor` from the installed environment, then allow the blocked file/location or use an environment approved by your policy.
 
 ## Known Limitations
 
-- First model download may require internet.
-- Bootstrap may require internet for the STT model, Ollama, and the Ollama cleanup model.
+- First speech model download may require internet.
+- Optional Ollama setup may require internet for Ollama and the configured Ollama cleanup model.
 - Clipboard fallback attempts to preserve common text, file-drop, and bitmap clipboard formats, but unusual/private formats may not restore.
 - Some elevated, protected, remote, game, or virtualized targets may reject simulated input.
 - Elevated/protected target support is fail-safe, not privileged UIAccess.

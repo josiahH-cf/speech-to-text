@@ -1,77 +1,18 @@
 from __future__ import annotations
 
-import copy
 import os
 import subprocess
 import tkinter as tk
 from tkinter import messagebox, ttk
-from typing import Any
 
 from .commands import app_command
 from .config import load_settings, logs_dir, save_settings
-from .hotkey import parse_hotkey
+from .settings_actions import update_settings as _updated_settings
 from .startup import disable_startup, enable_startup, is_startup_enabled
-
-VALID_INSERTION_MODES = {"auto", "direct", "typing", "clipboard"}
 
 
 def _bool(value) -> bool:
     return bool(value)
-
-
-def _required_text(value: str, field_name: str) -> str:
-    text = value.strip()
-    if not text:
-        raise ValueError(f"{field_name} is required.")
-    return text
-
-
-def _positive_float(value: str, field_name: str) -> float:
-    text = value.strip()
-    if not text:
-        raise ValueError(f"{field_name} is required.")
-    try:
-        parsed = float(text)
-    except ValueError:
-        raise ValueError(f"{field_name} must be a number.") from None
-    if parsed <= 0:
-        raise ValueError(f"{field_name} must be greater than 0.")
-    return parsed
-
-
-def _updated_settings(
-    settings: dict[str, Any],
-    *,
-    hotkey: str,
-    stt_model: str,
-    cleanup_enabled: bool,
-    cleanup_model: str,
-    insertion_mode: str,
-    silence_enabled: bool,
-    silence_seconds: str,
-    speech_threshold: str,
-    startup_enabled: bool,
-) -> dict[str, Any]:
-    updated = copy.deepcopy(settings)
-    normalized_hotkey = parse_hotkey(_required_text(hotkey, "Hotkey")).normalized
-    model = _required_text(stt_model, "Speech model")
-    cleanup_model_name = _required_text(cleanup_model, "Ollama model")
-    normalized_insertion_mode = _required_text(insertion_mode, "Insertion mode").lower()
-    if normalized_insertion_mode not in VALID_INSERTION_MODES:
-        raise ValueError("Insertion mode must be auto, direct, typing, or clipboard.")
-
-    updated["hotkey"] = normalized_hotkey
-    updated.setdefault("stt", {})["model"] = model
-    updated.setdefault("cleanup", {})["enabled"] = cleanup_enabled
-    updated.setdefault("cleanup", {})["model"] = cleanup_model_name
-    updated.setdefault("insertion", {})["mode"] = normalized_insertion_mode
-
-    silence = updated.setdefault("recording", {}).setdefault("silence_stop", {})
-    silence["enabled"] = silence_enabled
-    silence["silence_seconds"] = _positive_float(silence_seconds, "Silence seconds")
-    silence["speech_threshold"] = _positive_float(speech_threshold, "Speech threshold")
-    updated.setdefault("startup", {})["enabled"] = startup_enabled
-    return updated
 
 
 class SettingsWindow:

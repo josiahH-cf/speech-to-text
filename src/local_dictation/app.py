@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from enum import Enum
 
 from .cleanup import cleanup_text
@@ -20,6 +21,12 @@ class AppState(str, Enum):
     PROCESSING = "PROCESSING"
 
 
+@dataclass(frozen=True)
+class RuntimeControlResult:
+    ok: bool
+    message: str
+
+
 class DictationApp:
     def __init__(self, settings: dict, *, logger: logging.Logger | None = None) -> None:
         self.settings = settings
@@ -35,9 +42,16 @@ class DictationApp:
         self._reload_thread: threading.Thread | None = None
         self._settings_mtime = self._current_settings_mtime()
         self._pending_hotkey_reregister = False
+        self._started = False
+        self._runtime_enabled = False
 
     def start(self) -> None:
         with self._lock:
+            if self._started:
+                return
+            self._reload_stop.clear()
+            self._started = True
+            self._runtime_enabled = True
             self._start_hotkey_locked()
             self._reload_thread = threading.Thread(target=self._reload_loop, name="settings-reload", daemon=True)
             self._reload_thread.start()
@@ -49,6 +63,9 @@ class DictationApp:
             recorder = self._recorder
             self._recorder = None
             self.state = AppState.IDLE
+            self._runtime_enabled = False
+            self._started = False
+            self._pending_hotkey_reregister = False
         if recorder:
             try:
                 recorder.stop()
@@ -62,12 +79,44 @@ class DictationApp:
             self._reload_thread = None
         self.logger.info("Local Dictation app stopped.")
 
+    def runtime_enabled(self) -> bool:
+        with self._lock:
+            return self._runtime_enabled
+
+    def enable_runtime(self) -> RuntimeControlResult:
+        with self._lock:
+            if self._runtime_enabled:
+                return RuntimeControlResult(True, "Dictation runtime is already enabled.")
+            self.reload_settings()
+            self._runtime_enabled = True
+            self._start_hotkey_locked()
+        self.logger.info("Dictation runtime enabled.")
+        return RuntimeControlResult(True, "Dictation runtime enabled.")
+
+    def disable_runtime(self) -> RuntimeControlResult:
+        with self._lock:
+            if not self._runtime_enabled:
+                return RuntimeControlResult(True, "Dictation runtime is already disabled.")
+            if self.state != AppState.IDLE:
+                return RuntimeControlResult(False, f"Dictation runtime is busy: {self.state.value}.")
+            hotkey = self._hotkey
+            self._hotkey = None
+            self._runtime_enabled = False
+            self._pending_hotkey_reregister = False
+        if hotkey:
+            hotkey.stop()
+        self.logger.info("Dictation runtime disabled.")
+        return RuntimeControlResult(True, "Dictation runtime disabled.")
+
     def status_text(self) -> str:
         with self._lock:
             return self.state.value
 
     def handle_hotkey(self) -> None:
         with self._lock:
+            if not self._runtime_enabled:
+                self.logger.info("Hotkey ignored while dictation runtime is disabled.")
+                return
             if self.state == AppState.IDLE:
                 self.reload_settings()
                 self._start_recording_locked()
@@ -123,6 +172,8 @@ class DictationApp:
                 self._begin_processing_locked("silence")
 
     def _start_hotkey_locked(self) -> None:
+        if self._hotkey is not None:
+            return
         self._hotkey = GlobalHotkeyListener(
             self.settings.get("hotkey", "ctrl+alt+space"),
             self.handle_hotkey,
@@ -144,10 +195,10 @@ class DictationApp:
             except Exception:
                 self.logger.debug("Settings reload check failed.", exc_info=True)
 
-    def reload_settings(self) -> None:
+    def reload_settings(self, *, force: bool = False) -> None:
         with self._lock:
             new_mtime = self._current_settings_mtime()
-            if new_mtime == self._settings_mtime:
+            if not force and new_mtime == self._settings_mtime:
                 return
             old_hotkey = self.settings.get("hotkey")
             old_stt = self.settings.get("stt", {})
@@ -161,26 +212,26 @@ class DictationApp:
                     logger=get_logger("transcriber"),
                 )
 
-            if (
-                new_settings.get("hotkey") != old_hotkey
-                and self.state == AppState.IDLE
-                and self._hotkey
-                and not self._hotkey.is_listener_thread()
-            ):
+            hotkey_changed = new_settings.get("hotkey") != old_hotkey
+            if hotkey_changed and not self._runtime_enabled:
+                self._pending_hotkey_reregister = False
+            elif hotkey_changed and self.state == AppState.IDLE and self._hotkey and not self._hotkey.is_listener_thread():
                 self.logger.info("Hotkey changed; re-registering global hotkey.")
                 self._reregister_hotkey_locked()
-            elif new_settings.get("hotkey") != old_hotkey:
+            elif hotkey_changed:
                 self._pending_hotkey_reregister = True
                 self.logger.info("Hotkey changed; re-registration deferred until idle.")
 
     def _reregister_hotkey_locked(self) -> None:
         if self._hotkey:
             self._hotkey.stop()
-        self._start_hotkey_locked()
+            self._hotkey = None
+        if self._runtime_enabled:
+            self._start_hotkey_locked()
         self._pending_hotkey_reregister = False
 
     def _apply_pending_hotkey_reregister_locked(self) -> None:
-        if self._pending_hotkey_reregister and self.state == AppState.IDLE:
+        if self._runtime_enabled and self._pending_hotkey_reregister and self.state == AppState.IDLE:
             self.logger.info("Applying deferred hotkey re-registration.")
             self._reregister_hotkey_locked()
 

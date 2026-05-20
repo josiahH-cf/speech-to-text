@@ -22,7 +22,8 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
 Name: "startup"; Description: "Start Local Dictation when I sign in"; GroupDescription: "Startup:"; Flags: unchecked
-Name: "bootstrap"; Description: "Prepare speech model and Ollama after install"; GroupDescription: "Setup:"; Flags: checkedonce
+Name: "bootstrap"; Description: "Prepare speech model after install"; GroupDescription: "Setup:"; Flags: checkedonce
+Name: "ollama"; Description: "Prepare optional Ollama cleanup model"; GroupDescription: "Optional cleanup:"; Flags: unchecked
 
 [Files]
 Source: "..\dist\LocalDictation\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -35,8 +36,9 @@ Name: "{autodesktop}\Local Dictation"; Filename: "{app}\{#MyAppExeName}"; Parame
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Parameters: "startup enable"; Flags: runhidden; Tasks: startup
-Filename: "{app}\LocalDictationCLI.exe"; Parameters: "setup bootstrap"; Description: "Prepare Local Dictation"; Flags: postinstall; Tasks: bootstrap
+Filename: "{app}\LocalDictationCLI.exe"; Parameters: "setup bootstrap --stt-only"; Description: "Prepare Local Dictation speech model"; Flags: postinstall; Tasks: bootstrap
+Filename: "{app}\LocalDictationCLI.exe"; Parameters: "setup bootstrap --ollama-only"; Description: "Prepare optional Ollama cleanup"; Flags: postinstall; Tasks: ollama
 Filename: "{app}\{#MyAppExeName}"; Parameters: "run"; Description: "Launch Local Dictation"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "startup disable"; Flags: runhidden
+Filename: "{app}\{#MyAppExeName}"; Parameters: "startup disable"; Flags: runhidden; RunOnceId: "DisableStartup"
