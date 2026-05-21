@@ -73,11 +73,11 @@ Reasoning:
 
 ## Decision 9: Embedded Local Control UI
 
-Host the browser control UI inside the existing resident app process at `http://127.0.0.1:8765/`.
+Host the browser control UI inside the existing resident app process, preferring `http://127.0.0.1:8765/` and recovering to a nearby loopback port when the preferred port is busy.
 
 Reasoning:
 - `LocalDictation.exe run` already owns the tray icon, global hotkey, settings reload loop, and dictation runtime.
 - Keeping the localhost UI in that same process avoids a second daemon, service registration, or separate IPC layer.
-- The fixed loopback address gives users and support docs one stable place to open the standard UI.
+- The preferred loopback address gives users and support docs one stable default, while automatic fallback avoids losing the browser UI to unrelated local port conflicts.
 - Runtime off means dictation listening is disabled; it does not quit the tray process or disable startup-on-login.
 - The control UI should write the existing settings file and call the existing runtime seams rather than creating parallel configuration paths.

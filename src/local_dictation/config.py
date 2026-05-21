@@ -12,7 +12,7 @@ APP_NAME = "LocalDictation"
 KNOWN_STT_MODELS = ("tiny.en", "base.en", "small.en", "medium.en")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "config_version": 2,
+    "config_version": 3,
     "hotkey": "ctrl+alt+space",
     "recording": {
         "sample_rate": 16000,
@@ -61,6 +61,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     },
     "startup": {"enabled": False},
     "logging": {"level": "INFO", "keep_files": 5},
+    "gui": {"port": 8765},
 }
 
 
@@ -156,6 +157,9 @@ def migrate_settings(loaded: dict[str, Any]) -> dict[str, Any]:
         if insertion.get("mode") == "clipboard":
             insertion["mode"] = "auto"
         migrated["config_version"] = 2
+    if version < 3:
+        # gui.port is back-filled from DEFAULT_SETTINGS by deep_merge; no data migration needed.
+        migrated["config_version"] = 3
     return migrated
 
 

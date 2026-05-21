@@ -18,7 +18,7 @@ The expected review triggers are normal for this category of utility: global hot
 | Optional cleanup | Sends transcript text to the configured Ollama-compatible endpoint when cleanup is enabled. The default endpoint is local. | `src/local_dictation/cleanup.py`, `cleanup_text` |
 | Text insertion | Restores focus to the captured target window, sends Unicode keyboard input, and falls back to clipboard paste. | `src/local_dictation/insertion.py`, `insert_text` |
 | Clipboard | Reads, writes, and restores common clipboard formats during fallback. | `src/local_dictation/insertion.py`, `snapshot_clipboard` |
-| Local browser UI | Hosts a token-protected local UI on `http://127.0.0.1:8765/`. | `src/local_dictation/local_gui.py`, `LocalGuiServer` |
+| Local browser UI | Hosts a token-protected local UI on loopback, preferring `http://127.0.0.1:8765/` and recovering to a nearby port if needed. | `src/local_dictation/local_gui.py`, `LocalGuiServer` |
 | Startup | Can write or remove `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\LocalDictation`. Startup is opt-in. | `src/local_dictation/startup.py` |
 | Logs and settings | Stores settings and logs under `%APPDATA%\LocalDictation`. | `src/local_dictation/config.py`, `src/local_dictation/logging_config.py` |
 | Installer | Installs per-user under `%LOCALAPPDATA%\Programs\LocalDictation`. | `packaging/LocalDictation.iss` |
@@ -27,7 +27,7 @@ The expected review triggers are normal for this category of utility: global hot
 
 The app does not include telemetry or analytics endpoints in the reviewed source. Runtime network behavior is limited to these surfaces:
 
-- Local browser UI: `http://127.0.0.1:8765/`, bound to loopback.
+- Local browser UI: prefers `http://127.0.0.1:8765/`, bound to loopback, with nearby loopback fallback if the preferred port is busy.
 - Optional cleanup: default `http://localhost:11434/api/generate`, disabled by default.
 - Model preparation: `faster-whisper` may download model files through its normal model-loading path when `local_files_only` is false.
 - Optional setup: `setup bootstrap --ollama-only` can call `winget install Ollama.Ollama` and `ollama pull <model>`.
@@ -52,7 +52,7 @@ Unsigned artifacts may still draw reputation prompts on managed Windows devices.
 - Verify installer path: `%LOCALAPPDATA%\Programs\LocalDictation`.
 - Verify settings/log path: `%APPDATA%\LocalDictation`.
 - Verify optional startup value: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\LocalDictation`.
-- Verify localhost UI binds to `127.0.0.1:8765`.
+- Verify localhost UI binds to loopback at the preferred or recovered URL.
 - Verify optional cleanup default endpoint is `localhost:11434` and cleanup is disabled by default.
 - Verify release checksums and Authenticode signature status when provided.
 - Verify no source-level telemetry endpoint is present in the reviewed version.

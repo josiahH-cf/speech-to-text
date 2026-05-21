@@ -10,19 +10,55 @@ if ($LASTEXITCODE -ne 0) {
   Write-Host "Speech model setup is not complete yet. Run setup bootstrap --stt-only when you are ready to prepare dictation."
 }
 
+function Get-LocalDictationLocalGuiUrls {
+  $urls = @()
+  $stateFile = Join-Path $env:APPDATA "LocalDictation\local-gui.json"
+  if (Test-Path $stateFile) {
+    try {
+      $state = Get-Content $stateFile -Raw | ConvertFrom-Json
+      if ($null -ne $state.url -and ![string]::IsNullOrWhiteSpace([string]$state.url)) {
+        $urls += [string]$state.url
+      }
+    }
+    catch { }
+  }
+
+  $port = 8765
+  $settingsFile = Join-Path $env:APPDATA "LocalDictation\settings.json"
+  if (Test-Path $settingsFile) {
+    try {
+      $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
+      if ($null -ne $settings.gui -and $null -ne $settings.gui.port) {
+        $port = $settings.gui.port
+      }
+    }
+    catch { }
+  }
+
+  $urls += "http://127.0.0.1:$port/"
+  return $urls | Where-Object { ![string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+}
+
 Write-Host ""
 Write-Host "Local browser UI check:"
-try {
-  $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8765/" -TimeoutSec 2 -ErrorAction Stop
-  if ($response.StatusCode -eq 200) {
-    Write-Host "OK Local browser UI is responding at http://127.0.0.1:8765/."
+$localGuiResponded = $false
+foreach ($url in Get-LocalDictationLocalGuiUrls) {
+  $normalizedUrl = if ($url.EndsWith("/")) { $url } else { "$url/" }
+  $pingUrl = "$($normalizedUrl.TrimEnd('/'))/api/ping"
+  try {
+    $response = Invoke-RestMethod -Uri $pingUrl -TimeoutSec 2 -ErrorAction Stop
+    if ($response.app -eq "local-dictation") {
+      Write-Host "OK Local browser UI is responding at $normalizedUrl."
+      $localGuiResponded = $true
+      break
+    }
   }
-  else {
-    Write-Host "WARN Local browser UI returned HTTP $($response.StatusCode)."
+  catch {
+    continue
   }
 }
-catch {
-  Write-Host "INFO Local browser UI is not responding. Start the tray app, then open http://127.0.0.1:8765/ or use the tray menu."
+if (!$localGuiResponded) {
+  Write-Host "INFO Local browser UI is not responding. Start the tray app, then use the tray menu or python -m local_dictation gui."
 }
 
 Write-Host ""
@@ -33,4 +69,4 @@ Write-Host "3. Press Ctrl+Alt+Space."
 Write-Host "4. Say: this is a local dictation test"
 Write-Host "5. Press Ctrl+Alt+Space again."
 Write-Host "6. Confirm the text appears in Notepad."
-Write-Host "7. Open http://127.0.0.1:8765/ and confirm the browser UI shows runtime state and settings."
+Write-Host "7. Open the local browser UI from the tray menu and confirm it shows runtime state and settings."

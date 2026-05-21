@@ -2,20 +2,28 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
+import socket
 import threading
+import time
 import webbrowser
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from .config import load_settings, save_settings, settings_path
+from .config import app_data_dir, load_settings, save_settings, settings_path
+from . import __version__
 from .settings_actions import update_settings
 from .setup_manager import collect_setup_status
 
 LOCAL_GUI_HOST = "127.0.0.1"
 LOCAL_GUI_PORT = 8765
 LOCAL_GUI_URL = f"http://{LOCAL_GUI_HOST}:{LOCAL_GUI_PORT}/"
+LOCAL_GUI_FALLBACK_PORT_COUNT = 20
+LOCAL_GUI_STATE_FILENAME = "local-gui.json"
 MAX_JSON_BYTES = 16 * 1024
 LOCAL_GUI_ALLOWED_HOSTS = {LOCAL_GUI_HOST, "localhost"}
 SECURITY_HEADERS = (
@@ -29,6 +37,82 @@ SECURITY_HEADERS = (
 )
 
 
+@dataclass(frozen=True)
+class _ControlResult:
+  ok: bool
+  message: str
+
+
+def active_gui_state_path() -> Path:
+    return app_data_dir() / LOCAL_GUI_STATE_FILENAME
+
+
+def _valid_port(value: Any, default: int = LOCAL_GUI_PORT) -> int:
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return default
+    if port < 0 or port > 65535:
+        return default
+    return port
+
+
+def configured_gui_port(settings: dict[str, Any] | None = None) -> int:
+    source = settings if settings is not None else load_settings(create=False)
+    return _valid_port(source.get("gui", {}).get("port", LOCAL_GUI_PORT))
+
+
+def configured_gui_url(settings: dict[str, Any] | None = None) -> str:
+    return f"http://{LOCAL_GUI_HOST}:{configured_gui_port(settings)}/"
+
+
+def _candidate_ports(preferred_port: int) -> tuple[int, ...]:
+    if preferred_port == 0:
+        return (0,)
+    last_port = min(65535, preferred_port + LOCAL_GUI_FALLBACK_PORT_COUNT)
+    return tuple(range(preferred_port, last_port + 1))
+
+
+def _loopback_port_accepts_connections(port: int) -> bool:
+    try:
+        with socket.create_connection((LOCAL_GUI_HOST, port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+def _read_active_gui_state() -> dict[str, Any] | None:
+    try:
+        loaded = json.loads(active_gui_state_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def active_gui_url() -> str | None:
+    state = _read_active_gui_state()
+    if not state:
+        return None
+    url = state.get("url")
+    if not isinstance(url, str):
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme != "http" or parsed.hostname not in LOCAL_GUI_ALLOWED_HOSTS:
+        return None
+    return url if url.endswith("/") else f"{url}/"
+
+
+def candidate_gui_urls() -> tuple[str, ...]:
+    urls: list[str] = []
+    active_url = active_gui_url()
+    if active_url:
+        urls.append(active_url)
+    configured_url = configured_gui_url()
+    if configured_url not in urls:
+        urls.append(configured_url)
+    return tuple(urls)
+
+
 class LocalGuiServer:
     def __init__(self, app, *, logger: logging.Logger | None = None) -> None:
         self.app = app
@@ -36,23 +120,53 @@ class LocalGuiServer:
         self.token = secrets.token_urlsafe(24)
         self._server: _LocalGuiHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._port: int = LOCAL_GUI_PORT
+        self._edit_lock = threading.RLock()
+        self._edit_mode = False
+        self._resume_runtime_after_edit = False
 
     @property
     def url(self) -> str:
-        return LOCAL_GUI_URL
+        return f"http://{LOCAL_GUI_HOST}:{self._port}/"
 
     def start(self) -> bool:
         if self._server is not None:
             return True
-        try:
-            server = _LocalGuiHTTPServer((LOCAL_GUI_HOST, LOCAL_GUI_PORT), _LocalGuiHandler, self)
-        except OSError as exc:
-            self.logger.warning("Localhost GUI could not bind %s: %s", LOCAL_GUI_URL, exc)
+        preferred_port = configured_gui_port()
+        errors: list[tuple[int, OSError]] = []
+        server = None
+        for port in _candidate_ports(preferred_port):
+            if port != 0 and _loopback_port_accepts_connections(port):
+                exc = OSError(f"port {port} is already accepting loopback connections")
+                errors.append((port, exc))
+                if port == preferred_port:
+                    self.logger.warning("Localhost GUI could not bind http://%s:%s/: %s", LOCAL_GUI_HOST, port, exc)
+                else:
+                    self.logger.debug("Localhost GUI fallback port %s was unavailable: %s", port, exc)
+                continue
+            try:
+                server = _LocalGuiHTTPServer((LOCAL_GUI_HOST, port), _LocalGuiHandler, self)
+                break
+            except OSError as exc:
+                errors.append((port, exc))
+                if port == preferred_port:
+                    self.logger.warning("Localhost GUI could not bind http://%s:%s/: %s", LOCAL_GUI_HOST, port, exc)
+                else:
+                    self.logger.debug("Localhost GUI fallback port %s was unavailable: %s", port, exc)
+        if server is None:
+            attempted = ", ".join(str(port) for port, _exc in errors)
+            last_error = errors[-1][1] if errors else "no ports attempted"
+            self.logger.warning("Localhost GUI could not bind any loopback port (%s): %s", attempted, last_error)
             return False
+        self._port = server.server_address[1]
         self._server = server
         self._thread = threading.Thread(target=server.serve_forever, name="localhost-gui", daemon=True)
         self._thread.start()
-        self.logger.info("Localhost GUI listening at %s", LOCAL_GUI_URL)
+        self._write_active_state()
+        if self._port != preferred_port:
+            self.logger.warning("Localhost GUI recovered on %s after port %s was unavailable.", self.url, preferred_port)
+        else:
+            self.logger.info("Localhost GUI listening at %s", self.url)
         return True
 
     def stop(self) -> None:
@@ -65,15 +179,83 @@ class LocalGuiServer:
         if self._thread:
             self._thread.join(timeout=2)
             self._thread = None
+        self._clear_active_state()
         self.logger.info("Localhost GUI stopped.")
 
     def open_browser(self) -> None:
-        webbrowser.open(LOCAL_GUI_URL)
+        webbrowser.open(self.url)
+
+    def edit_state(self) -> dict[str, bool]:
+      with self._edit_lock:
+        return {
+          "editMode": self._edit_mode,
+          "resumeRuntimeAfterEdit": self._resume_runtime_after_edit,
+          "runtimePausedForEdit": self._edit_mode and self._resume_runtime_after_edit,
+        }
+
+    def enter_edit_mode(self):
+      with self._edit_lock:
+        if self._edit_mode:
+          return _ControlResult(True, "Edit mode is already active.")
+        status = self.app.status_text()
+        if status != "IDLE":
+          return _ControlResult(False, f"Dictation runtime is busy: {status}.")
+        resume_runtime = bool(self.app.runtime_enabled())
+        if resume_runtime:
+          result = self.app.disable_runtime()
+          if not result.ok:
+            return result
+        self._edit_mode = True
+        self._resume_runtime_after_edit = resume_runtime
+        return _ControlResult(True, "Edit mode enabled.")
+
+    def exit_edit_mode(self):
+      with self._edit_lock:
+        if not self._edit_mode:
+          return _ControlResult(True, "Edit mode is not active.")
+        resume_runtime = self._resume_runtime_after_edit
+        if not resume_runtime:
+          self._edit_mode = False
+          self._resume_runtime_after_edit = False
+          return _ControlResult(True, "Edit mode closed.")
+        result = self.app.enable_runtime()
+        if not result.ok:
+          return result
+        self._edit_mode = False
+        self._resume_runtime_after_edit = False
+        return _ControlResult(True, "Settings saved and runtime resumed.")
+
+    def _write_active_state(self) -> None:
+        payload = {
+            "app": "local-dictation",
+            "version": __version__,
+            "pid": os.getpid(),
+            "host": LOCAL_GUI_HOST,
+            "port": self._port,
+            "url": self.url,
+            "updated_at": time.time(),
+        }
+        try:
+            path = active_gui_state_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            self.logger.warning("Could not write localhost GUI state: %s", exc)
+
+    def _clear_active_state(self) -> None:
+        path = active_gui_state_path()
+        try:
+            state = _read_active_gui_state()
+            if state and state.get("pid") not in {None, os.getpid()}:
+                return
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            self.logger.debug("Could not remove localhost GUI state: %s", exc)
 
 
 class _LocalGuiHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    allow_reuse_address = False
 
     def __init__(self, server_address, handler_class, gui: LocalGuiServer) -> None:
         super().__init__(server_address, handler_class)
@@ -89,7 +271,7 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/":
-            self._send_html(_page_html(self.server.gui.token))
+            self._send_html(_page_html(self.server.gui.token, self.server.gui.url))
             return
         if path == "/api/state":
             self._send_json(self._state_payload())
@@ -100,6 +282,9 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
         if path == "/favicon.ico":
             self.send_response(204)
             self.end_headers()
+            return
+        if path == "/api/ping":
+            self._send_json({"app": "local-dictation", "version": __version__})
             return
         self._send_error(404, "Not found.")
 
@@ -117,6 +302,9 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
         if path == "/api/settings":
           self._update_settings(payload)
           self._send_json(self._state_payload())
+          return
+        if path == "/api/edit-mode":
+          self._update_edit_mode(payload)
           return
         if path == "/api/runtime":
           self._update_runtime(payload)
@@ -184,6 +372,7 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
         return {
             "running": True,
             "runtimeEnabled": app.runtime_enabled(),
+          **self.server.gui.edit_state(),
             "state": app.status_text(),
             "hotkey": settings.get("hotkey", "ctrl+alt+space"),
             "sttModel": settings.get("stt", {}).get("model", "base.en"),
@@ -229,6 +418,19 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
       )
       save_settings(updated)
       self.server.gui.app.reload_settings(force=True)
+      if self.server.gui.edit_state()["editMode"]:
+        result = self.server.gui.exit_edit_mode()
+        if not result.ok:
+          raise BusyError(result.message)
+
+    def _update_edit_mode(self, payload: dict[str, Any]) -> None:
+        enabled = payload.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ValueError("Edit mode enabled value must be true or false.")
+        result = self.server.gui.enter_edit_mode() if enabled else self.server.gui.exit_edit_mode()
+        if not result.ok:
+            raise BusyError(result.message)
+        self._send_json({**self._state_payload(), "message": result.message})
 
     def _update_runtime(self, payload: dict[str, Any]) -> None:
         enabled = payload.get("enabled")
@@ -281,7 +483,7 @@ class BusyError(RuntimeError):
     pass
 
 
-def _page_html(token: str) -> str:
+def _page_html(token: str, url: str) -> str:
     token_json = json.dumps(token)
     return f"""<!doctype html>
 <html lang=\"en\">
@@ -343,7 +545,7 @@ def _page_html(token: str) -> str:
     <header>
       <div>
         <h1>Local Dictation</h1>
-        <div class=\"url\">{LOCAL_GUI_URL}</div>
+        <div class="url">{url}</div>
       </div>
       <div id=\"runtime-pill\" class=\"pill off\">Loading</div>
     </header>
@@ -363,6 +565,7 @@ def _page_html(token: str) -> str:
         <div class=\"row\">
           <button id=\"runtime-button\">Turn On</button>
           <button id=\"record-button\" class=\"secondary\">Start Recording</button>
+          <button id=\"edit-mode-button\" class=\"secondary\">Edit Settings</button>
         </div>
       </section>
       <section>
@@ -404,6 +607,7 @@ def _page_html(token: str) -> str:
     </div>
     <div class=\"row\" style=\"margin-top: 14px; justify-content: flex-end;\">
       <button id=\"save-button\">Save Settings</button>
+      <button id=\"cancel-edit-button\" class=\"secondary\" style=\"display: none;\">Cancel</button>
     </div>
     <div id=\"message\" class=\"message\"></div>
   </main>
@@ -428,8 +632,34 @@ def _page_html(token: str) -> str:
       headers: {{ "Content-Type": "application/json", "X-Local-Dictation-Token": token }},
       body: JSON.stringify(body),
     }});
-    const render = (next) => {{
+    const settingsPayload = () => ({{
+      hotkey: $("hotkey").value,
+      sttModel: $("stt-model").value,
+      cleanupEnabled: $("cleanup-enabled").checked,
+      cleanupModel: $("cleanup-model").value,
+      insertionMode: $("insertion-mode").value,
+      inputDeviceId: $("input-device").value,
+      gainDb: $("gain-db").value,
+      silenceEnabled: $("silence-enabled").checked,
+      silenceSeconds: $("silence-seconds").value,
+      speechThreshold: $("speech-threshold").value,
+    }});
+    const renderSettings = (next) => {{
+      $("hotkey").value = next.hotkey;
+      $("stt-model").value = next.sttModel;
+      $("cleanup-enabled").checked = next.cleanupEnabled;
+      $("cleanup-model").value = next.cleanupModel;
+      $("insertion-mode").value = next.insertionMode;
+      $("input-device").value = next.inputDeviceId;
+      $("gain-db").value = next.gainDb;
+      $("silence-enabled").checked = next.silenceEnabled;
+      $("silence-seconds").value = next.silenceSeconds;
+      $("speech-threshold").value = next.speechThreshold;
+    }};
+    const render = (next, options = {{}}) => {{
+      const preserveSettings = options.preserveSettings ?? state?.editMode === true;
       state = next;
+      const editMode = state.editMode === true;
       $("runtime-pill").textContent = state.runtimeEnabled ? "Runtime On" : "Runtime Off";
       $("runtime-pill").className = state.runtimeEnabled ? "pill" : "pill off";
       $("state-pill").textContent = state.state;
@@ -441,37 +671,36 @@ def _page_html(token: str) -> str:
       $("last-result").className = state.lastResult?.ok ? "message" : "message error";
       $("runtime-button").textContent = state.runtimeEnabled ? "Turn Off" : "Turn On";
       $("runtime-button").className = state.runtimeEnabled ? "danger" : "";
+      $("runtime-button").disabled = editMode;
       $("record-button").textContent = state.state === "RECORDING" ? "Stop Recording" : "Start Recording";
-      $("record-button").disabled = !state.runtimeEnabled || state.state === "PROCESSING";
-      $("hotkey").value = state.hotkey;
-      $("stt-model").value = state.sttModel;
-      $("cleanup-enabled").checked = state.cleanupEnabled;
-      $("cleanup-model").value = state.cleanupModel;
-      $("insertion-mode").value = state.insertionMode;
-      $("input-device").value = state.inputDeviceId;
-      $("gain-db").value = state.gainDb;
-      $("silence-enabled").checked = state.silenceEnabled;
-      $("silence-seconds").value = state.silenceSeconds;
-      $("speech-threshold").value = state.speechThreshold;
+      $("record-button").disabled = editMode || !state.runtimeEnabled || state.state === "PROCESSING";
+      $("edit-mode-button").textContent = editMode ? "Editing Settings" : "Edit Settings";
+      $("edit-mode-button").disabled = editMode;
+      $("save-button").textContent = editMode ? "Save and Resume" : "Save Settings";
+      $("cancel-edit-button").style.display = editMode ? "" : "none";
+      if (!preserveSettings) renderSettings(state);
       $("settings-path").textContent = state.settingsPath;
     }};
     const refresh = async () => render(await request("/api/state"));
 
+    $("edit-mode-button").addEventListener("click", async () => {{
+      try {{
+        render(await post("/api/edit-mode", {{ enabled: true }}));
+        message("Edit mode enabled. Dictation listening is paused while you edit.");
+      }} catch (error) {{ message(error.message, true); }}
+    }});
+
     $("save-button").addEventListener("click", async () => {{
       try {{
-        render(await post("/api/settings", {{
-          hotkey: $("hotkey").value,
-          sttModel: $("stt-model").value,
-          cleanupEnabled: $("cleanup-enabled").checked,
-          cleanupModel: $("cleanup-model").value,
-          insertionMode: $("insertion-mode").value,
-          inputDeviceId: $("input-device").value,
-          gainDb: $("gain-db").value,
-          silenceEnabled: $("silence-enabled").checked,
-          silenceSeconds: $("silence-seconds").value,
-          speechThreshold: $("speech-threshold").value,
-        }}));
-        message("Settings saved.");
+        const wasEditing = state?.editMode === true;
+        render(await post("/api/settings", settingsPayload()), {{ preserveSettings: false }});
+        message(wasEditing ? "Settings saved and runtime restored." : "Settings saved and applied.");
+      }} catch (error) {{ message(error.message, true); }}
+    }});
+    $("cancel-edit-button").addEventListener("click", async () => {{
+      try {{
+        render(await post("/api/edit-mode", {{ enabled: false }}), {{ preserveSettings: false }});
+        message("Edit mode closed.");
       }} catch (error) {{ message(error.message, true); }}
     }});
     $("runtime-button").addEventListener("click", async () => {{
@@ -487,7 +716,9 @@ def _page_html(token: str) -> str:
       }} catch (error) {{ message(error.message, true); }}
     }});
     refresh().catch((error) => message(error.message, true));
-    setInterval(() => refresh().catch(() => {{}}), 2000);
+    setInterval(() => {{
+      if (state?.editMode !== true) refresh().catch(() => {{}});
+    }}, 2000);
   </script>
 </body>
 </html>"""

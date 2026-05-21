@@ -42,7 +42,8 @@ def run_tray(settings: dict) -> None:
     app = DictationApp(settings, logger=logger)
     app.start()
     local_gui = LocalGuiServer(app, logger=logger)
-    local_gui.start()
+    if not local_gui.start():
+        logger.warning("Localhost GUI is unavailable; tray and hotkey dictation remain available.")
 
     def status_item(_item):
         return f"Status: {app.status_text()}"
@@ -59,6 +60,8 @@ def run_tray(settings: dict) -> None:
     def open_local_gui(_icon, _item):
         if local_gui.start():
             local_gui.open_browser()
+        else:
+            logger.warning("Localhost GUI is unavailable; could not open browser UI.")
 
     def open_logs(_icon, _item):
         logs_dir().mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,6 @@
 param(
   [string]$InstallerPath = "",
+  [switch]$InstallTools,
   [switch]$SkipSpeechModel,
   [switch]$WithOllama,
   [switch]$NoStartup,
@@ -29,6 +30,9 @@ function Resolve-LocalDictationInstaller {
   param([string]$Path)
 
   if (![string]::IsNullOrWhiteSpace($Path)) {
+    if (!(Test-Path -LiteralPath $Path)) {
+      throw "Installer not found at '$Path'. Check the path or omit -InstallerPath to auto-build."
+    }
     $resolved = Resolve-Path -Path $Path -ErrorAction Stop
     return $resolved.Path
   }
@@ -67,13 +71,72 @@ function Start-LocalDictationApp {
   Start-Process -FilePath $app -ArgumentList "run"
 }
 
-function Test-LocalDictationLocalGui {
-  try {
-    $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8765/" -TimeoutSec 3 -ErrorAction Stop
-    return $response.StatusCode -eq 200
+function Get-LocalDictationLocalGuiUrls {
+  $urls = @()
+
+  $stateFile = Join-Path $env:APPDATA "LocalDictation\local-gui.json"
+  if (Test-Path $stateFile) {
+    try {
+      $state = Get-Content $stateFile -Raw | ConvertFrom-Json
+      if ($null -ne $state.url -and ![string]::IsNullOrWhiteSpace([string]$state.url)) {
+        $urls += [string]$state.url
+      }
+    }
+    catch { }
   }
-  catch {
-    return $false
+
+  $port = 8765
+  $settingsFile = Join-Path $env:APPDATA "LocalDictation\settings.json"
+  if (Test-Path $settingsFile) {
+    try {
+      $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
+      if ($null -ne $settings.gui -and $null -ne $settings.gui.port) {
+        $port = $settings.gui.port
+      }
+    }
+    catch { }
+  }
+
+  $urls += "http://127.0.0.1:$port/"
+  return $urls | Where-Object { ![string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+}
+
+function Test-LocalDictationLocalGui {
+  param(
+    [int]$Attempts = 20,
+    [int]$DelayMilliseconds = 500
+  )
+
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    foreach ($url in Get-LocalDictationLocalGuiUrls) {
+      $normalizedUrl = if ($url.EndsWith("/")) { $url } else { "$url/" }
+      $pingUrl = "$($normalizedUrl.TrimEnd('/'))/api/ping"
+      try {
+        $response = Invoke-RestMethod -Uri $pingUrl -TimeoutSec 2 -ErrorAction Stop
+        if ($response.app -eq "local-dictation") {
+          return $normalizedUrl
+        }
+      }
+      catch { }
+    }
+
+    if ($attempt -lt $Attempts) {
+      Start-Sleep -Milliseconds $DelayMilliseconds
+    }
+  }
+
+  return $null
+}
+
+if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
+  $existing = Get-ChildItem -Path "dist\installer" -Filter "LocalDictationSetup-*.exe" -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+  if (!$existing) {
+    Write-Host "No installer found under dist\installer. Building now..."
+    $buildArgs = @{}
+    if ($InstallTools) { $buildArgs["InstallTools"] = $true }
+    & "$PSScriptRoot\build-installer.ps1" @buildArgs
   }
 }
 
@@ -118,11 +181,12 @@ if ($NoLaunch) {
 else {
   Write-LocalDictationInstallProgress -PercentComplete 90 -Status "Launching Local Dictation."
   Start-LocalDictationApp
-  if (Test-LocalDictationLocalGui) {
-    Write-Host "Localhost UI is available at http://127.0.0.1:8765/."
+  $localGuiUrl = Test-LocalDictationLocalGui
+  if ($localGuiUrl) {
+    Write-Host "Localhost UI is available at $localGuiUrl."
   }
   else {
-    Write-Host "Localhost UI did not respond on http://127.0.0.1:8765/. Dictation may still work from the tray and hotkey. If needed, quit and relaunch Local Dictation or run Doctor from the Start Menu."
+    Write-Host "Localhost UI did not respond after launch. Dictation may still work from the tray and hotkey. Check %APPDATA%\LocalDictation\logs\local-dictation.log or run Doctor from the Start Menu."
   }
 }
 

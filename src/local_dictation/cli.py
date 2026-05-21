@@ -101,10 +101,11 @@ def _settings(_args: argparse.Namespace) -> int:
 def _gui(_args: argparse.Namespace) -> int:
     import webbrowser
 
-    from .local_gui import LOCAL_GUI_URL
+    from .local_gui import candidate_gui_urls
 
-    webbrowser.open(LOCAL_GUI_URL)
-    print(f"Opened {LOCAL_GUI_URL}")
+    url = candidate_gui_urls()[0]
+    webbrowser.open(url)
+    print(f"Opened {url}")
     return 0
 
 

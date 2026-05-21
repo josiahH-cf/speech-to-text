@@ -27,24 +27,31 @@ function Get-LocalDictationSignTool {
     return $candidates[0].FullName
   }
 
-  throw "signtool.exe was not found. Install the Windows SDK or omit -CodeSigningCertThumbprint."
+  return $null
 }
 
 function Invoke-LocalDictationCodeSign {
-  param([string[]]$Paths)
+  param(
+    [string[]]$Paths,
+    [string]$CertThumbprint = "",
+    [string]$TsUrl = ""
+  )
 
-  if ([string]::IsNullOrWhiteSpace($CodeSigningCertThumbprint)) {
+  if ([string]::IsNullOrWhiteSpace($CertThumbprint)) {
     return
   }
 
   $signTool = Get-LocalDictationSignTool
+  if (-not $signTool) {
+    throw "signtool.exe was not found. Install the Windows SDK or omit -CodeSigningCertThumbprint."
+  }
   foreach ($path in $Paths) {
     if (!(Test-Path $path)) {
       continue
     }
-    $arguments = @("sign", "/sha1", $CodeSigningCertThumbprint, "/fd", "SHA256")
-    if (![string]::IsNullOrWhiteSpace($TimestampUrl)) {
-      $arguments += @("/tr", $TimestampUrl, "/td", "SHA256")
+    $arguments = @("sign", "/sha1", $CertThumbprint, "/fd", "SHA256")
+    if (![string]::IsNullOrWhiteSpace($TsUrl)) {
+      $arguments += @("/tr", $TsUrl, "/td", "SHA256")
     }
     $arguments += $path
     & $signTool @arguments
@@ -126,7 +133,7 @@ $exeArtifacts = @(
   "dist\LocalDictation\LocalDictation.exe",
   "dist\LocalDictation\LocalDictationCLI.exe"
 )
-Invoke-LocalDictationCodeSign -Paths $exeArtifacts
+Invoke-LocalDictationCodeSign -Paths $exeArtifacts -CertThumbprint $CodeSigningCertThumbprint -TsUrl $TimestampUrl
 
 if ($SkipInstaller) {
   Write-LocalDictationReleaseEvidence -PythonPath $python -ArtifactPaths $exeArtifacts
@@ -174,7 +181,12 @@ if (-not $isccPath) {
 }
 
 & $isccPath packaging\LocalDictation.iss
-$installerArtifact = "dist\installer\LocalDictationSetup-0.2.0.exe"
-Invoke-LocalDictationCodeSign -Paths @($installerArtifact)
+$installerArtifact = Get-ChildItem -Path "dist\installer" -Filter "LocalDictationSetup-*.exe" -File -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1 -ExpandProperty FullName
+if (!$installerArtifact) {
+  throw "Inno Setup did not produce an installer under dist\installer. Check the build output above."
+}
+Invoke-LocalDictationCodeSign -Paths @($installerArtifact) -CertThumbprint $CodeSigningCertThumbprint -TsUrl $TimestampUrl
 Write-LocalDictationReleaseEvidence -PythonPath $python -ArtifactPaths ($exeArtifacts + @($installerArtifact))
-Write-Host "Installer built at dist\installer\LocalDictationSetup-0.2.0.exe"
+Write-Host "Installer built at $installerArtifact"

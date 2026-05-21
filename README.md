@@ -9,10 +9,14 @@ Default hotkey: `Ctrl+Alt+Space`.
 Use this when you want the normal setup: app installed, speech model prepared, startup enabled, and Local Dictation launched when setup finishes.
 
 ```powershell
-$installer = ".\dist\installer\LocalDictationSetup-0.2.0.exe"; .\scripts\install-user.ps1 -InstallerPath $installer
+.\scripts\install-user.ps1
 ```
 
-The script prints progress while it installs the app, prepares the speech model, enables startup, launches Local Dictation, and checks the local browser UI.
+The script builds the installer automatically if one does not exist under `dist\installer\`, then installs the app, prepares the speech model, enables startup, launches Local Dictation, and checks the local browser UI. If the default browser UI port is busy, the app recovers on a nearby loopback port and the script prints the working URL. Add `-InstallTools` if Inno Setup is not installed. To use an installer you already have (for example, downloaded from GitHub Releases), pass `-InstallerPath`:
+
+```powershell
+.\scripts\install-user.ps1 -InstallerPath "C:\path\to\LocalDictationSetup-0.2.0.exe"
+```
 
 After install:
 
@@ -25,7 +29,7 @@ After install:
 Local Dictation will start again when you sign in to Windows. To install without startup, use:
 
 ```powershell
-$installer = ".\dist\installer\LocalDictationSetup-0.2.0.exe"; .\scripts\install-user.ps1 -InstallerPath $installer -NoStartup
+.\scripts\install-user.ps1 -NoStartup
 ```
 
 ## Install Without Preparing The Speech Model
@@ -33,7 +37,7 @@ $installer = ".\dist\installer\LocalDictationSetup-0.2.0.exe"; .\scripts\install
 Use this if you want the app installed now but want to download or prepare the speech model later.
 
 ```powershell
-$installer = ".\dist\installer\LocalDictationSetup-0.2.0.exe"; .\scripts\install-user.ps1 -InstallerPath $installer -SkipSpeechModel
+.\scripts\install-user.ps1 -SkipSpeechModel
 ```
 
 This keeps the app intact, but usable dictation still requires a speech model. Prepare it later from the installed command line:
@@ -47,7 +51,7 @@ This keeps the app intact, but usable dictation still requires a speech model. P
 Local cleanup can add punctuation and formatting through a local Ollama model. It is not required for dictation, but it is supported as a one-command setup choice.
 
 ```powershell
-$installer = ".\dist\installer\LocalDictationSetup-0.2.0.exe"; .\scripts\install-user.ps1 -InstallerPath $installer -WithOllama
+.\scripts\install-user.ps1 -WithOllama
 ```
 
 This can take longer. It may install Ollama through `winget`, pull the configured local cleanup model, and turn cleanup on.
@@ -76,11 +80,15 @@ Right-click the tray icon for:
 - `Run Doctor`
 - `Quit`
 
-The local browser UI is available while the tray app is running:
+The local browser UI is available while the tray app is running. The preferred URL is:
 
 ```text
 http://127.0.0.1:8765/
 ```
+
+If that port is already in use, Local Dictation automatically tries nearby loopback ports. Use the tray menu or the `gui` command to open the active recovered URL.
+
+Use `Edit Settings` in the browser UI before changing settings there. Edit mode pauses dictation listening while the form is open, keeps the automatic status refresh from overwriting your typing, then `Save and Resume` applies the new settings and restores listening if it was on before. `Cancel` exits edit mode and discards unsaved form edits.
 
 Settings and logs live under `%APPDATA%\LocalDictation`:
 
@@ -118,14 +126,13 @@ The app creates settings automatically, reloads safe setting changes, reports th
 
 ## If The Browser UI Does Not Open
 
-The tray app uses `http://127.0.0.1:8765/` for the browser UI. If that port is already busy, dictation can still work from the tray and hotkey.
+The tray app prefers `http://127.0.0.1:8765/` for the browser UI. If that port is already busy, Local Dictation automatically recovers on a nearby loopback port and dictation can still work from the tray and hotkey.
 
 Try this:
 
-1. Right-click the tray icon and choose `Quit`.
-2. Launch `Local Dictation` from the Start Menu.
-3. Right-click the tray icon and choose `Open Localhost GUI`.
-4. If it still does not open, run `Doctor` from the Start Menu.
+1. Right-click the tray icon and choose `Open Localhost GUI`.
+2. Or run `LocalDictationCLI.exe gui` from the installed command line.
+3. If it still does not open, run `Doctor` from the Start Menu and check the logs.
 
 ## Advanced Docs
 

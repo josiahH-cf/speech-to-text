@@ -7,7 +7,7 @@ Record results here before marking v0.2 complete.
 - Dedicated Notepad, browser text field, and editor text field dictation targets.
 - Clipboard preservation after direct typing and recoverable clipboard fallback after insertion failure.
 - Elevated or protected target fail-safe behavior.
-- Local browser UI tray launch, command launch, runtime controls, settings save, setup readiness display, shutdown behavior, and occupied-port behavior.
+- Local browser UI tray launch, command launch, runtime controls, edit-mode settings save, setup readiness display, shutdown behavior, and occupied-port behavior.
 
 ## Environment
 
@@ -93,18 +93,23 @@ History Notes:
 
 ## Local Browser UI
 
-- [ ] Tray menu opens `http://127.0.0.1:8765/` in the default browser.
-- [ ] `LocalDictation.exe gui` opens `http://127.0.0.1:8765/` without starting another server process.
+- [ ] Tray menu opens the active localhost UI URL in the default browser.
+- [ ] `LocalDictation.exe gui` opens the active localhost UI URL without starting another server process.
 - [ ] Browser UI shows runtime enabled/off, current pipeline state, last transcript availability, and settings path.
 - [ ] Browser UI shows core speech-model readiness.
+- [ ] `Edit Settings` pauses runtime while the app is idle and the UI shows edit mode.
+- [ ] Form values typed in edit mode stay intact for at least two automatic refresh intervals.
+- [ ] `Save and Resume` saves settings, reloads runtime settings, exits edit mode, and restores runtime only when it was on before edit mode.
+- [ ] `Cancel` exits edit mode, discards unsaved form edits, and restores runtime only when it was on before edit mode.
+- [ ] Edit mode returns a visible busy error when dictation is recording or processing.
 - [ ] Hotkey binding change saves, normalizes, and re-registers when the app is idle.
 - [ ] STT model change saves and the next recording uses a rebuilt transcriber.
 - [ ] Cleanup enabled toggle and cleanup model field save to `%APPDATA%\LocalDictation\settings.json`.
 - [ ] Runtime Off disables dictation listening without quitting the tray process or localhost UI.
 - [ ] Runtime On re-enables hotkey dictation from the browser UI.
 - [ ] Browser Start/Stop Recording uses the same runtime path as the global hotkey.
-- [ ] Quit from the tray stops the localhost server; `http://127.0.0.1:8765/` no longer responds afterward.
-- [ ] If port `8765` is already occupied, tray dictation still starts and logs that the browser UI could not bind.
+- [ ] Quit from the tray stops the localhost server; the active localhost UI URL no longer responds afterward.
+- [ ] If port `8765` is already occupied, tray dictation still starts, the browser UI recovers on a nearby loopback port, and the recovered URL responds.
 
 History Notes:
 - The localhost UI is hosted by `LocalDictation.exe run`; it is not a Windows service or separate daemon.

@@ -27,10 +27,14 @@
   - Optional Ollama status can be requested explicitly.
   - Ollama winget install and pull commands are tested.
 - Local browser UI:
-  - Fixed localhost constants point to `http://127.0.0.1:8765/`.
+  - Default localhost constants point to `http://127.0.0.1:8765/`.
+  - Occupied configured ports recover to a nearby loopback port and expose the active URL.
   - State endpoint reports runtime state, hotkey, STT model, cleanup settings, settings path, and core setup readiness.
   - Setup endpoint reports core speech-model readiness without checking optional Ollama.
   - Settings endpoint validates hotkeys, updates model settings, and forces settings reload.
+  - Edit mode endpoint pauses runtime while idle, rejects busy recording or processing states, and resumes only when the runtime was enabled before edit mode.
+  - Edit-mode settings save validates and persists settings, reloads while paused, exits edit mode, and preserves edit mode on validation failure.
+  - Browser page wiring suppresses full form-refresh overwrites while edit mode is active.
   - Mutation endpoints reject missing or invalid local tokens.
   - Runtime and recording endpoints return a busy response instead of interrupting processing.
   - CLI `gui` command opens the existing tray-hosted URL without starting another server.
@@ -66,10 +70,11 @@
 8. Press `Ctrl+Alt+Space` again.
 9. Confirm text appears in Notepad.
 10. Repeat in a browser text field and a code editor text area.
-11. Open `http://127.0.0.1:8765/` from the tray menu.
+11. Open the local browser UI from the tray menu.
 12. Confirm the browser UI shows the current runtime state, hotkey, STT model, cleanup settings, and core speech-model readiness.
 13. Disable runtime in the browser UI and verify the hotkey no longer starts recording.
 14. Re-enable runtime in the browser UI and verify hotkey dictation works again.
+15. Enter browser Edit mode, type into settings fields for more than five seconds, verify values are not overwritten, then save and confirm runtime resumes when it was previously enabled.
 
 ## Manual Error Tests
 
@@ -78,6 +83,6 @@
 - Enable cleanup without Ollama running and verify raw transcript still inserts.
 - Try an elevated target app and verify either insertion succeeds or final text remains on clipboard with a logged warning.
 - Build the PyInstaller bundle and run packaged `doctor`.
-- Launch the tray app and verify `http://127.0.0.1:8765/` is available only while the tray process is running.
-- Occupy port `8765` before launching the tray app and verify dictation still runs while the browser UI logs an unavailable-port warning.
+- Launch the tray app and verify the reported localhost UI URL is available only while the tray process is running.
+- Occupy port `8765` before launching the tray app and verify dictation still runs while the browser UI recovers on a nearby loopback port and logs the recovered URL.
 - Compile the Inno installer and install/uninstall per-user.

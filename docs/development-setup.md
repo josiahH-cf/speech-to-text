@@ -54,7 +54,8 @@ Manual smoke test:
 4. Say: `this is a local dictation test`.
 5. Press `Ctrl+Alt+Space` again.
 6. Confirm text appears in Notepad.
-7. Open `http://127.0.0.1:8765/` and confirm the browser UI shows runtime state and settings.
+7. Open the tray `Open Localhost GUI` command, or `http://127.0.0.1:8765/` when the default port is free, and confirm the browser UI shows runtime state and settings.
+8. Click `Edit Settings`, type into a setting field for more than five seconds, confirm the value is not overwritten, then use `Cancel` or `Save and Resume`.
 
 ## Build The Installer
 
@@ -81,7 +82,7 @@ Outputs:
 ```text
 dist\LocalDictation\LocalDictation.exe
 dist\LocalDictation\LocalDictationCLI.exe
-dist\installer\LocalDictationSetup-0.2.0.exe
+dist\installer\LocalDictationSetup-<version>.exe
 ```
 
 Release builds also write evidence under `dist\release-evidence`.

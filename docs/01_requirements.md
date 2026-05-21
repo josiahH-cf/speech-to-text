@@ -14,6 +14,7 @@
 - Provide startup enable/disable through the current user's Windows startup registry key.
 - Provide a per-user Windows installer.
 - Provide a settings window.
+- Provide a browser settings edit mode that pauses dictation listening, prevents live refresh from overwriting edits, and resumes listening after save when appropriate.
 - Provide silence auto-stop.
 - Provide diagnostics through a `doctor` command.
 - Provide install, run, configuration, troubleshooting, and known limitation docs.

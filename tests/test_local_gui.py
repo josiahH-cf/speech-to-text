@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
 
 from local_dictation.app import RuntimeControlResult
-from local_dictation.config import load_settings
+from local_dictation.config import load_settings, save_settings
 from local_dictation.local_gui import (
     LOCAL_GUI_HOST,
     LOCAL_GUI_PORT,
@@ -15,6 +16,7 @@ from local_dictation.local_gui import (
     LocalGuiServer,
     _LocalGuiHTTPServer,
     _LocalGuiHandler,
+    active_gui_url,
 )
 
 
@@ -25,6 +27,8 @@ class FakeApp:
         self.last_transcript = ""
         self.reload_forces: list[bool] = []
         self.hotkey_calls = 0
+        self.enable_calls = 0
+        self.disable_calls = 0
 
     def runtime_enabled(self) -> bool:
         return self._runtime_enabled
@@ -45,10 +49,12 @@ class FakeApp:
         self.reload_forces.append(force)
 
     def enable_runtime(self) -> RuntimeControlResult:
+        self.enable_calls += 1
         self._runtime_enabled = True
         return RuntimeControlResult(True, "enabled")
 
     def disable_runtime(self) -> RuntimeControlResult:
+        self.disable_calls += 1
         if self.state != "IDLE":
             return RuntimeControlResult(False, "busy")
         self._runtime_enabled = False
@@ -106,10 +112,52 @@ def request_headers(base_url: str, path: str):
         return response.status, response.headers
 
 
-def test_local_gui_uses_fixed_loopback_url():
+def request_text(base_url: str, path: str):
+    request = urllib.request.Request(f"{base_url}{path}")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return response.status, response.read().decode("utf-8")
+
+
+def test_local_gui_default_constants():
     assert LOCAL_GUI_HOST == "127.0.0.1"
     assert LOCAL_GUI_PORT == 8765
     assert LOCAL_GUI_URL == "http://127.0.0.1:8765/"
+
+
+def test_ping_endpoint_returns_app_identity():
+    app = FakeApp()
+    with local_gui_test_server(app) as base_url:
+        status, body = request_json(base_url, "/api/ping")
+    assert status == 200
+    assert body["app"] == "local-dictation"
+    assert "version" in body
+
+
+def test_local_gui_recovers_when_configured_port_is_busy(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    settings = load_settings(create=True)
+
+    blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    blocker.bind((LOCAL_GUI_HOST, 0))
+    blocker.listen(1)
+    occupied_port = blocker.getsockname()[1]
+    settings["gui"]["port"] = occupied_port
+    save_settings(settings)
+
+    gui = LocalGuiServer(app)
+    try:
+        assert gui.start() is True
+        assert gui.url != f"http://{LOCAL_GUI_HOST}:{occupied_port}/"
+        assert active_gui_url() == gui.url
+        status, body = request_json(gui.url, "/api/ping")
+    finally:
+        gui.stop()
+        blocker.close()
+
+    assert active_gui_url() is None
+    assert status == 200
+    assert body["app"] == "local-dictation"
 
 
 def test_state_endpoint_returns_live_state_and_settings(monkeypatch, tmp_path):
@@ -123,6 +171,9 @@ def test_state_endpoint_returns_live_state_and_settings(monkeypatch, tmp_path):
 
     assert status == 200
     assert body["runtimeEnabled"] is True
+    assert body["editMode"] is False
+    assert body["resumeRuntimeAfterEdit"] is False
+    assert body["runtimePausedForEdit"] is False
     assert body["state"] == "IDLE"
     assert body["hotkey"] == "ctrl+alt+space"
     assert body["sttModel"] == "base.en"
@@ -215,6 +266,140 @@ def test_settings_endpoint_saves_and_forces_reload(monkeypatch, tmp_path):
     assert app.reload_forces == [True]
 
 
+def test_edit_mode_endpoint_pauses_runtime_and_tracks_resume(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        status, body = request_json(base_url, "/api/edit-mode", {"enabled": True})
+
+    assert status == 200
+    assert body["editMode"] is True
+    assert body["runtimeEnabled"] is False
+    assert body["resumeRuntimeAfterEdit"] is True
+    assert body["runtimePausedForEdit"] is True
+    assert app.disable_calls == 1
+    assert app.enable_calls == 0
+
+
+def test_edit_mode_endpoint_rejects_busy_runtime(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    app.state = "RECORDING"
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        status, body = request_json(base_url, "/api/edit-mode", {"enabled": True})
+        state_status, state_body = request_json(base_url, "/api/state")
+
+    assert status == 409
+    assert body["error"] == "Dictation runtime is busy: RECORDING."
+    assert state_status == 200
+    assert state_body["editMode"] is False
+    assert app.runtime_enabled() is True
+    assert app.disable_calls == 0
+    assert app.enable_calls == 0
+
+
+def test_edit_mode_cancel_resumes_only_when_it_paused_runtime(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        enter_status, enter_body = request_json(base_url, "/api/edit-mode", {"enabled": True})
+        exit_status, exit_body = request_json(base_url, "/api/edit-mode", {"enabled": False})
+
+    assert enter_status == 200
+    assert enter_body["editMode"] is True
+    assert exit_status == 200
+    assert exit_body["editMode"] is False
+    assert exit_body["runtimeEnabled"] is True
+    assert app.disable_calls == 1
+    assert app.enable_calls == 1
+
+
+def test_edit_mode_cancel_keeps_previously_disabled_runtime_off(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    app._runtime_enabled = False
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        enter_status, enter_body = request_json(base_url, "/api/edit-mode", {"enabled": True})
+        exit_status, exit_body = request_json(base_url, "/api/edit-mode", {"enabled": False})
+
+    assert enter_status == 200
+    assert enter_body["editMode"] is True
+    assert enter_body["resumeRuntimeAfterEdit"] is False
+    assert exit_status == 200
+    assert exit_body["editMode"] is False
+    assert exit_body["runtimeEnabled"] is False
+    assert app.disable_calls == 0
+    assert app.enable_calls == 0
+
+
+def test_settings_endpoint_in_edit_mode_saves_reloads_and_resumes(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        enter_status, enter_body = request_json(base_url, "/api/edit-mode", {"enabled": True})
+        save_status, save_body = request_json(
+            base_url,
+            "/api/settings",
+            {
+                "hotkey": "Ctrl-Alt-Space",
+                "sttModel": "tiny.en",
+                "cleanupEnabled": True,
+                "cleanupModel": "llama3.2:1b",
+                "insertionMode": "clipboard",
+                "inputDeviceId": "default",
+                "gainDb": "3",
+                "silenceEnabled": True,
+                "silenceSeconds": "1.8",
+                "speechThreshold": "0.011",
+            },
+        )
+
+    saved = load_settings(create=True)
+    assert enter_status == 200
+    assert enter_body["editMode"] is True
+    assert save_status == 200
+    assert save_body["editMode"] is False
+    assert save_body["runtimeEnabled"] is True
+    assert save_body["sttModel"] == "tiny.en"
+    assert saved["stt"]["model"] == "tiny.en"
+    assert saved["recording"]["gain_db"] == 3.0
+    assert app.disable_calls == 1
+    assert app.enable_calls == 1
+    assert app.reload_forces == [True]
+
+
+def test_invalid_settings_save_keeps_edit_mode_active(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        enter_status, enter_body = request_json(base_url, "/api/edit-mode", {"enabled": True})
+        save_status, save_body = request_json(base_url, "/api/settings", {"hotkey": "ctrl+alt+nope"})
+        state_status, state_body = request_json(base_url, "/api/state")
+
+    assert enter_status == 200
+    assert enter_body["editMode"] is True
+    assert save_status == 400
+    assert "Unsupported hotkey" in save_body["error"]
+    assert state_status == 200
+    assert state_body["editMode"] is True
+    assert state_body["runtimeEnabled"] is False
+    assert app.disable_calls == 1
+    assert app.enable_calls == 0
+    assert app.reload_forces == []
+
+
 def test_settings_endpoint_rejects_invalid_hotkey(monkeypatch, tmp_path):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     app = FakeApp()
@@ -225,6 +410,24 @@ def test_settings_endpoint_rejects_invalid_hotkey(monkeypatch, tmp_path):
 
     assert status == 400
     assert "Unsupported hotkey" in body["error"]
+
+
+def test_browser_page_wires_edit_mode_and_skips_refresh_while_editing(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        status, html = request_text(base_url, "/")
+
+    assert status == 200
+    assert 'id="edit-mode-button"' in html
+    assert 'id="cancel-edit-button"' in html
+    assert 'post("/api/edit-mode", { enabled: true })' in html
+    assert 'post("/api/edit-mode", { enabled: false })' in html
+    assert 'const preserveSettings = options.preserveSettings ?? state?.editMode === true;' in html
+    assert 'if (!preserveSettings) renderSettings(state);' in html
+    assert 'if (state?.editMode !== true) refresh().catch' in html
 
 
 def test_runtime_endpoint_returns_busy_when_app_is_not_idle(monkeypatch, tmp_path):

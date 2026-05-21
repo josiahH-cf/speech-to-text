@@ -34,7 +34,7 @@ def test_deep_merge_fills_missing_values_and_preserves_unknowns():
 def test_migrate_v1_clipboard_default_to_auto():
     migrated = migrate_settings({"insertion": {"mode": "clipboard"}})
 
-    assert migrated["config_version"] == 2
+    assert migrated["config_version"] == 3
     assert migrated["insertion"]["mode"] == "auto"
 
 

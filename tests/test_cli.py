@@ -2,7 +2,8 @@ from local_dictation.cli import main
 from local_dictation.local_gui import LOCAL_GUI_URL
 
 
-def test_gui_command_opens_existing_localhost_ui(monkeypatch, capsys):
+def test_gui_command_opens_existing_localhost_ui(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
     opened = []
     monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
 

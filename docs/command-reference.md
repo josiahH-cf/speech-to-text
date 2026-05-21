@@ -22,7 +22,7 @@ LocalDictation.exe gui
 
 - `run` starts the tray app.
 - `settings` opens the Tkinter settings window.
-- `gui` opens the localhost browser UI after the tray app is running.
+- `gui` opens the active localhost browser UI after the tray app is running, including a recovered URL if the default port was busy. Use the browser UI's `Edit Settings` control before changing settings so dictation listening pauses and form fields are not overwritten by status refresh.
 
 ## CLI Commands
 
