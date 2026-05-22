@@ -379,6 +379,7 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
             "cleanupEnabled": bool(settings.get("cleanup", {}).get("enabled", False)),
             "cleanupModel": settings.get("cleanup", {}).get("model", "gemma3:1b"),
             "insertionMode": insertion.get("mode", "auto"),
+            "cueTone": recording.get("cue_tone", "off"),
             "inputDeviceId": "default" if recording.get("input_device_id") is None else str(recording.get("input_device_id")),
             "gainDb": recording.get("gain_db", 0.0),
             "silenceEnabled": bool(silence.get("enabled", True)),
@@ -410,6 +411,7 @@ class _LocalGuiHandler(BaseHTTPRequestHandler):
         cleanup_model=str(payload.get("cleanupModel", current.get("cleanup", {}).get("model", "gemma3:1b"))),
         insertion_mode=str(payload.get("insertionMode", insertion.get("mode", "auto"))),
         input_device_id=str(payload.get("inputDeviceId", recording.get("input_device_id") or "default")),
+        cue_tone=str(payload.get("cueTone", recording.get("cue_tone", "off"))),
         gain_db=str(payload.get("gainDb", recording.get("gain_db", 0.0))),
         silence_enabled=bool(payload.get("silenceEnabled", silence.get("enabled", True))),
         silence_seconds=str(payload.get("silenceSeconds", silence.get("silence_seconds", 1.4))),
@@ -596,6 +598,13 @@ def _page_html(token: str, url: str) -> str:
         <h2>Audio</h2>
         <label for=\"input-device\">Input device</label>
         <input id=\"input-device\" autocomplete=\"off\" spellcheck=\"false\">
+        <label for=\"cue-tone\">Recording cue</label>
+        <select id=\"cue-tone\">
+          <option value=\"off\">Off</option>
+          <option value=\"soft_ding\">Soft ding</option>
+          <option value=\"low_chime\">Low chime</option>
+          <option value=\"muted_tick\">Muted tick</option>
+        </select>
         <label for=\"gain-db\">Microphone gain dB</label>
         <input id=\"gain-db\" autocomplete=\"off\" spellcheck=\"false\">
         <label><input id=\"silence-enabled\" type=\"checkbox\">Stop after silence</label>
@@ -639,6 +648,7 @@ def _page_html(token: str, url: str) -> str:
       cleanupModel: $("cleanup-model").value,
       insertionMode: $("insertion-mode").value,
       inputDeviceId: $("input-device").value,
+      cueTone: $("cue-tone").value,
       gainDb: $("gain-db").value,
       silenceEnabled: $("silence-enabled").checked,
       silenceSeconds: $("silence-seconds").value,
@@ -651,6 +661,7 @@ def _page_html(token: str, url: str) -> str:
       $("cleanup-model").value = next.cleanupModel;
       $("insertion-mode").value = next.insertionMode;
       $("input-device").value = next.inputDeviceId;
+      $("cue-tone").value = next.cueTone;
       $("gain-db").value = next.gainDb;
       $("silence-enabled").checked = next.silenceEnabled;
       $("silence-seconds").value = next.silenceSeconds;

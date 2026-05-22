@@ -103,17 +103,27 @@ function Get-LocalDictationLocalGuiUrls {
 
 function Test-LocalDictationLocalGui {
   param(
-    [int]$Attempts = 20,
+    [int]$Attempts = 60,
     [int]$DelayMilliseconds = 500
   )
 
   for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
     foreach ($url in Get-LocalDictationLocalGuiUrls) {
       $normalizedUrl = if ($url.EndsWith("/")) { $url } else { "$url/" }
-      $pingUrl = "$($normalizedUrl.TrimEnd('/'))/api/ping"
+      $baseUrl = $normalizedUrl.TrimEnd('/')
+      $pingUrl = "$baseUrl/api/ping"
       try {
         $response = Invoke-RestMethod -Uri $pingUrl -TimeoutSec 2 -ErrorAction Stop
         if ($response.app -eq "local-dictation") {
+          return $normalizedUrl
+        }
+      }
+      catch { }
+
+      $stateUrl = "$baseUrl/api/state"
+      try {
+        $response = Invoke-RestMethod -Uri $stateUrl -TimeoutSec 2 -ErrorAction Stop
+        if ($null -ne $response.sttModel -and $null -ne $response.settingsPath -and ([string]$response.settingsPath).Contains("LocalDictation")) {
           return $normalizedUrl
         }
       }
@@ -149,6 +159,8 @@ $taskArgument = "/TASKS=`"$($tasks -join ',')`""
 $installerArguments = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", $taskArgument)
 
 Write-LocalDictationInstallProgress -PercentComplete 10 -Status "Using installer: $installer"
+Write-LocalDictationInstallProgress -PercentComplete 20 -Status "Stopping Local Dictation if it is running."
+Get-Process -Name "LocalDictation", "LocalDictationCLI" -ErrorAction SilentlyContinue | Stop-Process -Force
 Write-LocalDictationInstallProgress -PercentComplete 25 -Status "Installing Local Dictation."
 $process = Start-Process -FilePath $installer -ArgumentList $installerArguments -Wait -PassThru
 if ($process.ExitCode -ne 0) {

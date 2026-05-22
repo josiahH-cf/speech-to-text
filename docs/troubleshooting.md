@@ -74,4 +74,12 @@ Remove everything, including installed files and startup state, from the reposit
 
 ## Security Policy Blocks
 
-If Windows reports `Application Control policy has blocked this file`, a native dependency such as `tokenizers` may be blocked. Run Doctor from the installed environment, then allow the blocked file/location or use an environment approved by your policy.
+If Windows reports `Application Control policy has blocked this file`, the app executable, uninstaller, CLI, or a native dependency such as `tokenizers` may be blocked. Run Doctor from the installed environment, then allow the blocked file/location or use an environment approved by your policy.
+
+The repository uninstall helper is designed to keep removing Local Dictation when the installed CLI or Inno Setup uninstaller is blocked. Run:
+
+```powershell
+.\scripts\uninstall-user.ps1 -Everything
+```
+
+It falls back to direct cleanup for startup, installed files, shortcuts, app data, known speech-model caches, and known local cleanup pieces.

@@ -108,6 +108,7 @@ In Settings or the browser UI, most people only need these choices:
 - Hotkey: default is `Ctrl+Alt+Space`.
 - Input device: `default` uses the Windows default microphone; Doctor lists numeric input device IDs.
 - Microphone gain: use a small positive dB value if quiet speech stays below the speech threshold.
+- Recording cue: default is `off`; choose one of the three muted built-in tones for microphone start and stop feedback.
 - Speech threshold and silence seconds: adjust these only when silence stop starts or stops too aggressively.
 - Speech model: `base.en` is the default and best first choice.
 - Startup: enabled by the normal install script unless you used `-NoStartup`.

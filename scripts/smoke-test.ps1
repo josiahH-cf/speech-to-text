@@ -44,10 +44,23 @@ Write-Host "Local browser UI check:"
 $localGuiResponded = $false
 foreach ($url in Get-LocalDictationLocalGuiUrls) {
   $normalizedUrl = if ($url.EndsWith("/")) { $url } else { "$url/" }
-  $pingUrl = "$($normalizedUrl.TrimEnd('/'))/api/ping"
+  $baseUrl = $normalizedUrl.TrimEnd('/')
+  $pingUrl = "$baseUrl/api/ping"
   try {
     $response = Invoke-RestMethod -Uri $pingUrl -TimeoutSec 2 -ErrorAction Stop
     if ($response.app -eq "local-dictation") {
+      Write-Host "OK Local browser UI is responding at $normalizedUrl."
+      $localGuiResponded = $true
+      break
+    }
+  }
+  catch {
+  }
+
+  $stateUrl = "$baseUrl/api/state"
+  try {
+    $response = Invoke-RestMethod -Uri $stateUrl -TimeoutSec 2 -ErrorAction Stop
+    if ($null -ne $response.sttModel -and $null -ne $response.settingsPath -and ([string]$response.settingsPath).Contains("LocalDictation")) {
       Write-Host "OK Local browser UI is responding at $normalizedUrl."
       $localGuiResponded = $true
       break

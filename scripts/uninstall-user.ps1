@@ -96,7 +96,15 @@ function Get-LocalDictationOllamaPaths {
 function Disable-LocalDictationStartup {
   $cli = Join-Path $env:LOCALAPPDATA "Programs\LocalDictation\LocalDictationCLI.exe"
   if (Test-Path $cli) {
-    & $cli startup disable
+    try {
+      & $cli startup disable
+      if ($LASTEXITCODE -ne 0) {
+        Write-Host "LocalDictationCLI.exe startup disable failed with exit code $LASTEXITCODE; removing startup registry entry directly."
+      }
+    }
+    catch {
+      Write-Host "LocalDictationCLI.exe could not disable startup; removing startup registry entry directly."
+    }
   }
   Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "LocalDictation" -ErrorAction SilentlyContinue
 }
@@ -147,6 +155,20 @@ function Remove-LocalDictationData {
   }
 }
 
+function Remove-LocalDictationInstallArtifacts {
+  $programsDir = [Environment]::GetFolderPath("Programs")
+  if (![string]::IsNullOrWhiteSpace($programsDir)) {
+    Remove-LocalDictationPath -Path (Join-Path $programsDir "Local Dictation")
+  }
+
+  $desktopDir = [Environment]::GetFolderPath("Desktop")
+  if (![string]::IsNullOrWhiteSpace($desktopDir)) {
+    Remove-LocalDictationPath -Path (Join-Path $desktopDir "Local Dictation.lnk")
+  }
+
+  Remove-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6C9EC15F-627D-4669-B5D9-C986181593B3}_is1" -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 $installDir = Join-Path $env:LOCALAPPDATA "Programs\LocalDictation"
 $appDataDir = Join-Path $env:APPDATA "LocalDictation"
 $ollamaModels = @(Get-LocalDictationOllamaModels)
@@ -162,15 +184,21 @@ $uninstaller = Get-ChildItem -Path $installDir -Filter "unins*.exe" -File -Error
   Sort-Object LastWriteTime -Descending |
   Select-Object -First 1
 if ($uninstaller) {
-  $process = Start-Process -FilePath $uninstaller.FullName -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Wait -PassThru
-  if ($process.ExitCode -ne 0) {
-    throw "Uninstaller failed with exit code $($process.ExitCode)."
+  try {
+    $process = Start-Process -FilePath $uninstaller.FullName -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Wait -PassThru
+    if ($process.ExitCode -ne 0) {
+      throw "Uninstaller failed with exit code $($process.ExitCode)."
+    }
+  }
+  catch {
+    Write-Host "Local Dictation uninstaller could not run; removing installed files directly."
   }
 }
 
 Write-LocalDictationUninstallProgress -PercentComplete 75 -Status "Removing remaining installed files."
 Remove-LocalDictationPath -Path $installDir
 Assert-LocalDictationPathRemoved -Path $installDir
+Remove-LocalDictationInstallArtifacts
 
 Write-LocalDictationUninstallProgress -PercentComplete 82 -Status "Removing app data and model caches."
 Remove-LocalDictationData

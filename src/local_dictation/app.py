@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
+from .audio_cues import play_recording_cue
 from .cleanup import cleanup_text
 from .config import load_settings, settings_path
 from .hotkey import GlobalHotkeyListener
@@ -166,6 +167,7 @@ class DictationApp:
             on_silence_stop=self._silence_stop_reached,
         )
         try:
+            play_recording_cue(self.settings.get("recording", {}), "start", logger=get_logger("audio_cues"))
             recorder.start()
         except RecordingError as exc:
             message = f"Recording could not start: {exc}"
@@ -297,6 +299,7 @@ class DictationApp:
                 return
 
             recording = recorder.stop()
+            play_recording_cue(self.settings.get("recording", {}), "stop", logger=get_logger("audio_cues"))
             self.logger.info(
                 "Recording stopped: %.2f seconds.",
                 recording.duration_seconds,

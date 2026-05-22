@@ -123,6 +123,47 @@ def test_recording_start_failure_updates_last_result(monkeypatch, tmp_path):
     assert "no microphone" in payload["message"]
 
 
+def test_recording_cues_wrap_microphone_capture(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    patch_hotkeys(monkeypatch)
+    settings = default_settings()
+    settings["recording"]["cue_tone"] = "soft_ding"
+    events = []
+
+    class FakeRecorder:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            events.append("recorder-start")
+
+        def stop(self):
+            events.append("recorder-stop")
+            return RecordingResult(audio=[], sample_rate=16000, duration_seconds=1.0)
+
+    class FakeTranscriber:
+        def transcribe(self, _recording):
+            return TranscriptionResult(text="", language="en", duration_seconds=1.0)
+
+    def fake_play_recording_cue(_recording_settings, event, *, logger=None):
+        events.append(f"cue-{event}")
+
+    monkeypatch.setattr("local_dictation.app.MicrophoneRecorder", FakeRecorder)
+    monkeypatch.setattr("local_dictation.app.play_recording_cue", fake_play_recording_cue)
+    app = DictationApp(settings)
+    app._transcriber = FakeTranscriber()
+
+    app.start()
+    app.handle_hotkey()
+    app.handle_hotkey()
+    processing_thread = app._processing_thread
+    assert processing_thread is not None
+    processing_thread.join(timeout=2)
+    app.stop()
+
+    assert events == ["cue-start", "recorder-start", "recorder-stop", "cue-stop"]
+
+
 def test_empty_transcription_updates_last_result(monkeypatch, tmp_path):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     app = DictationApp(default_settings())

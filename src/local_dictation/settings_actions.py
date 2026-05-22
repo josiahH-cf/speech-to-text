@@ -3,9 +3,11 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from .audio_cues import CUE_TONE_OPTIONS
 from .hotkey import parse_hotkey
 
 VALID_INSERTION_MODES = {"auto", "direct", "typing", "clipboard"}
+VALID_CUE_TONES = set(CUE_TONE_OPTIONS)
 MIN_GAIN_DB = -12.0
 MAX_GAIN_DB = 24.0
 
@@ -83,6 +85,7 @@ def update_settings(
     cleanup_model: str,
     insertion_mode: str,
     input_device_id: str = "default",
+    cue_tone: str | None = None,
     gain_db: str = "0",
     silence_enabled: bool,
     silence_seconds: str,
@@ -102,6 +105,11 @@ def update_settings(
 
     updated.setdefault("insertion", {})["mode"] = normalized_insertion_mode
     recording = updated.setdefault("recording", {})
+    if cue_tone is not None:
+        normalized_cue_tone = required_text(cue_tone, "Recording cue").lower()
+        if normalized_cue_tone not in VALID_CUE_TONES:
+            raise ValueError("Recording cue must be off, soft_ding, low_chime, or muted_tick.")
+        recording["cue_tone"] = normalized_cue_tone
     recording["input_device_id"] = optional_device_id(input_device_id)
     recording["gain_db"] = float_in_range(gain_db, "Microphone gain", MIN_GAIN_DB, MAX_GAIN_DB)
     silence = recording.setdefault("silence_stop", {})

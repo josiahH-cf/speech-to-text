@@ -26,6 +26,30 @@ def test_uninstall_script_removes_app_data_after_uninstaller():
     assert "Assert-LocalDictationPathRemoved -Path $appDataDir" in script
 
 
+def test_uninstall_script_falls_back_when_installed_cli_is_blocked():
+    script = _script_text()
+
+    assert "try {" in script
+    assert "could not disable startup; removing startup registry entry directly" in script
+    cli_disable = script.index("& $cli startup disable")
+    registry_cleanup = script.index("Remove-ItemProperty")
+    assert cli_disable < registry_cleanup
+
+
+def test_uninstall_script_cleans_artifacts_if_uninstaller_is_blocked():
+    script = _script_text()
+
+    assert "Local Dictation uninstaller could not run; removing installed files directly" in script
+    assert "function Remove-LocalDictationInstallArtifacts" in script
+    assert '[Environment]::GetFolderPath("Programs")' in script
+    assert '[Environment]::GetFolderPath("Desktop")' in script
+    assert "{6C9EC15F-627D-4669-B5D9-C986181593B3}_is1" in script
+    install_dir_removed = script.index("Assert-LocalDictationPathRemoved -Path $installDir")
+    artifacts_removed = script.index("Remove-LocalDictationInstallArtifacts", install_dir_removed)
+    data_cleanup = script.index('Status "Removing app data and model caches."')
+    assert install_dir_removed < artifacts_removed < data_cleanup
+
+
 def test_uninstall_script_removes_ollama_user_roots_unless_kept():
     script = _script_text()
 

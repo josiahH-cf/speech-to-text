@@ -18,6 +18,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "sample_rate": 16000,
         "channels": 1,
         "max_seconds": 120,
+        "cue_tone": "off",
         "input_device_id": None,
         "gain_db": 0.0,
         "silence_stop": {

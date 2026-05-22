@@ -178,6 +178,7 @@ def test_state_endpoint_returns_live_state_and_settings(monkeypatch, tmp_path):
     assert body["hotkey"] == "ctrl+alt+space"
     assert body["sttModel"] == "base.en"
     assert body["insertionMode"] == "auto"
+    assert body["cueTone"] == "off"
     assert body["inputDeviceId"] == "default"
     assert body["gainDb"] == 0.0
     assert body["silenceEnabled"] is True
@@ -243,6 +244,7 @@ def test_settings_endpoint_saves_and_forces_reload(monkeypatch, tmp_path):
                 "cleanupEnabled": True,
                 "cleanupModel": "llama3.2:1b",
                 "insertionMode": "clipboard",
+                "cueTone": "soft_ding",
                 "inputDeviceId": "2: USB Mic",
                 "gainDb": "6",
                 "silenceEnabled": False,
@@ -258,6 +260,7 @@ def test_settings_endpoint_saves_and_forces_reload(monkeypatch, tmp_path):
     assert saved["cleanup"]["enabled"] is True
     assert saved["cleanup"]["model"] == "llama3.2:1b"
     assert saved["insertion"]["mode"] == "clipboard"
+    assert saved["recording"]["cue_tone"] == "soft_ding"
     assert saved["recording"]["input_device_id"] == 2
     assert saved["recording"]["gain_db"] == 6.0
     assert saved["recording"]["silence_stop"]["enabled"] is False
@@ -412,6 +415,18 @@ def test_settings_endpoint_rejects_invalid_hotkey(monkeypatch, tmp_path):
     assert "Unsupported hotkey" in body["error"]
 
 
+def test_settings_endpoint_rejects_invalid_recording_cue(monkeypatch, tmp_path):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    app = FakeApp()
+    load_settings(create=True)
+
+    with local_gui_test_server(app) as base_url:
+        status, body = request_json(base_url, "/api/settings", {"cueTone": "loud_bell"})
+
+    assert status == 400
+    assert "Recording cue" in body["error"]
+
+
 def test_browser_page_wires_edit_mode_and_skips_refresh_while_editing(monkeypatch, tmp_path):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     app = FakeApp()
@@ -423,6 +438,11 @@ def test_browser_page_wires_edit_mode_and_skips_refresh_while_editing(monkeypatc
     assert status == 200
     assert 'id="edit-mode-button"' in html
     assert 'id="cancel-edit-button"' in html
+    assert 'id="cue-tone"' in html
+    assert 'value="soft_ding"' in html
+    assert 'value="low_chime"' in html
+    assert 'value="muted_tick"' in html
+    assert 'cueTone: $("cue-tone").value' in html
     assert 'post("/api/edit-mode", { enabled: true })' in html
     assert 'post("/api/edit-mode", { enabled: false })' in html
     assert 'const preserveSettings = options.preserveSettings ?? state?.editMode === true;' in html

@@ -31,9 +31,21 @@ def test_install_user_local_gui_health_uses_active_url_and_retries():
     script = _script_text("install-user.ps1")
     assert "local-gui.json" in script
     assert "/api/ping" in script
+    assert "/api/state" in script
+    assert "sttModel" in script
+    assert "[int]$Attempts = 60" in script
     assert "Start-Sleep" in script
     assert "return $normalizedUrl" in script
     assert "Localhost UI is available at $localGuiUrl" in script
+
+
+def test_install_user_stops_running_processes_before_installer():
+    """install-user.ps1 must stop LocalDictation processes before running the installer."""
+    script = _script_text("install-user.ps1")
+    assert 'Get-Process -Name "LocalDictation", "LocalDictationCLI" -ErrorAction SilentlyContinue | Stop-Process -Force' in script
+    stop_pos = script.index("Stop-Process -Force")
+    installer_pos = script.index("Start-Process -FilePath $installer")
+    assert stop_pos < installer_pos
 
 
 def test_smoke_test_uses_active_localhost_url():
@@ -41,4 +53,6 @@ def test_smoke_test_uses_active_localhost_url():
     script = _script_text("smoke-test.ps1")
     assert "local-gui.json" in script
     assert "/api/ping" in script
+    assert "/api/state" in script
+    assert "sttModel" in script
     assert "python -m local_dictation gui" in script

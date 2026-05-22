@@ -10,6 +10,7 @@ def test_default_settings_are_created(tmp_path):
     assert settings["stt"]["engine"] == "faster-whisper"
     assert settings["insertion"]["mode"] == "auto"
     assert settings["recording"]["input_device_id"] is None
+    assert settings["recording"]["cue_tone"] == "off"
     assert settings["recording"]["gain_db"] == 0.0
     assert settings["recording"]["silence_stop"]["enabled"] is True
     assert settings["setup"]["ollama_install"] == "auto"
@@ -27,6 +28,7 @@ def test_deep_merge_fills_missing_values_and_preserves_unknowns():
     assert merged["hotkey"] == "ctrl+shift+d"
     assert merged["stt"]["model"] == "tiny.en"
     assert merged["stt"]["device"] == "cpu"
+    assert merged["recording"]["cue_tone"] == "off"
     assert merged["recording"]["silence_stop"]["silence_seconds"] == 1.4
     assert merged["custom"]["keep"] is True
 

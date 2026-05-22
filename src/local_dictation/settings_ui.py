@@ -5,6 +5,7 @@ import subprocess
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from .audio_cues import CUE_TONE_OPTIONS
 from .commands import app_command
 from .config import load_settings, logs_dir, save_settings, settings_path
 from .settings_actions import update_settings as _updated_settings
@@ -48,6 +49,7 @@ class SettingsWindow:
 
         recording = self.settings.get("recording", {})
         self.input_device_id = tk.StringVar(value=_input_device_value(recording.get("input_device_id")))
+        self.cue_tone = tk.StringVar(value=recording.get("cue_tone", "off"))
         self.gain_db = tk.StringVar(value=str(recording.get("gain_db", 0.0)))
         silence = self.settings.get("recording", {}).get("silence_stop", {})
         self.silence_enabled = tk.BooleanVar(value=_bool(silence.get("enabled", True)))
@@ -79,6 +81,12 @@ class SettingsWindow:
         row += 1
         ttk.Label(frame, text="Input device").grid(row=row, column=0, sticky="w", pady=4)
         ttk.Combobox(frame, textvariable=self.input_device_id, values=_input_device_options(), width=29).grid(
+            row=row, column=1, sticky="ew", pady=4
+        )
+
+        row += 1
+        ttk.Label(frame, text="Recording cue").grid(row=row, column=0, sticky="w", pady=4)
+        ttk.Combobox(frame, textvariable=self.cue_tone, values=CUE_TONE_OPTIONS, width=29).grid(
             row=row, column=1, sticky="ew", pady=4
         )
 
@@ -132,6 +140,7 @@ class SettingsWindow:
                 cleanup_model=self.cleanup_model.get(),
                 insertion_mode=self.insertion_mode.get(),
                 input_device_id=self.input_device_id.get(),
+                cue_tone=self.cue_tone.get(),
                 gain_db=self.gain_db.get(),
                 silence_enabled=self.silence_enabled.get(),
                 silence_seconds=self.silence_seconds.get(),
