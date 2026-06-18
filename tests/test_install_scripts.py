@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
+PACKAGING_DIR = Path(__file__).resolve().parents[1] / "packaging"
 
 
 def _script_text(name: str) -> str:
@@ -56,3 +57,24 @@ def test_smoke_test_uses_active_localhost_url():
     assert "/api/state" in script
     assert "sttModel" in script
     assert "python -m local_dictation gui" in script
+
+
+def test_installer_enables_startup_task_by_default():
+    """The installer's startup task must be checked by default so auto-start is on."""
+    iss = (PACKAGING_DIR / "LocalDictation.iss").read_text(encoding="utf-8")
+    startup_lines = [line for line in iss.splitlines() if 'Name: "startup"' in line]
+    assert startup_lines, "startup task line not found in LocalDictation.iss"
+    assert "unchecked" not in startup_lines[0]
+
+
+def test_installer_runs_startup_enable_on_task():
+    """The installer must call 'startup enable' when the startup task is selected."""
+    iss = (PACKAGING_DIR / "LocalDictation.iss").read_text(encoding="utf-8")
+    assert 'Parameters: "startup enable"' in iss
+    assert 'Parameters: "startup disable"' in iss
+
+
+def test_uninstall_removes_scheduled_task():
+    """uninstall-user.ps1 must remove the logon scheduled task as a direct fallback."""
+    script = _script_text("uninstall-user.ps1")
+    assert '/Delete /TN "LocalDictation"' in script

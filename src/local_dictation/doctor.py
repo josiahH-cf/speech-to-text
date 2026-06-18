@@ -157,10 +157,13 @@ def run_doctor() -> int:
 
     if sys.platform == "win32":
         try:
-            from .startup import startup_command
+            from .startup import scheduled_task_exists, startup_command
 
             command = startup_command()
             lines.append(f"INFO Startup command: {command or 'not enabled'}")
+            lines.append(
+                f"INFO Startup scheduled task: {'registered' if scheduled_task_exists() else 'not registered'}"
+            )
         except Exception as exc:
             lines.append(f"WARN Startup status could not be read: {exc}")
 

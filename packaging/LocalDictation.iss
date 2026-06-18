@@ -21,7 +21,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
-Name: "startup"; Description: "Start Local Dictation when I sign in"; GroupDescription: "Startup:"; Flags: unchecked
+Name: "startup"; Description: "Start Local Dictation when I sign in"; GroupDescription: "Startup:"
 Name: "bootstrap"; Description: "Prepare speech model after install"; GroupDescription: "Setup:"; Flags: checkedonce
 Name: "ollama"; Description: "Prepare optional Ollama cleanup model"; GroupDescription: "Optional cleanup:"; Flags: unchecked
 

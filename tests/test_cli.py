@@ -21,6 +21,31 @@ def test_cleanup_data_requires_confirmation(capsys):
     assert "--yes" in capsys.readouterr().out
 
 
+def test_run_exits_when_another_instance_is_running(monkeypatch, capsys):
+    started = []
+    monkeypatch.setattr("local_dictation.cli.acquire_single_instance", lambda: False)
+    monkeypatch.setattr("local_dictation.cli.load_settings", lambda *a, **k: started.append("loaded") or {})
+
+    result = main(["run"])
+
+    assert result == 0
+    assert started == []
+    assert "already running" in capsys.readouterr().out.lower()
+
+
+def test_startup_status_reports_run_entry_and_scheduled_task(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr("local_dictation.cli.startup_command", lambda: '"X" run')
+    monkeypatch.setattr("local_dictation.cli.scheduled_task_exists", lambda: True)
+
+    result = main(["startup", "status"])
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "Run entry:" in out
+    assert "Scheduled task: registered" in out
+
+
 def test_cleanup_data_removes_app_data_and_model_cache(monkeypatch, tmp_path):
     app_data = tmp_path / "LocalDictation"
     model_cache = tmp_path / "models--Systran--faster-whisper-base.en"

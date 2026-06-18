@@ -107,6 +107,7 @@ function Disable-LocalDictationStartup {
     }
   }
   Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "LocalDictation" -ErrorAction SilentlyContinue
+  & schtasks.exe /Delete /TN "LocalDictation" /F 2>$null
 }
 
 function Uninstall-LocalDictationOllama {

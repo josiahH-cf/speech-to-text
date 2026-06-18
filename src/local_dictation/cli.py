@@ -11,11 +11,25 @@ from .insertion import insert_text
 from .logging_config import configure_logging
 from .recorder import RecordingResult
 from .setup_manager import bootstrap_setup, collect_setup_status
-from .startup import build_startup_command, disable_startup, enable_startup, startup_command
+from .single_instance import acquire_single_instance
+from .startup import (
+    TASK_NAME,
+    build_startup_command,
+    disable_scheduled_task,
+    disable_startup,
+    enable_scheduled_task,
+    enable_startup,
+    scheduled_task_exists,
+    startup_command,
+)
 from .transcriber import FasterWhisperTranscriber
 
 
 def _run(args: argparse.Namespace) -> int:
+    if not acquire_single_instance():
+        print("Local Dictation is already running.")
+        return 0
+
     settings = load_settings(create=True)
     if args.no_tray:
         from .app import DictationApp
@@ -52,18 +66,30 @@ def _startup(args: argparse.Namespace) -> int:
     if args.action == "enable":
         command = build_startup_command()
         enable_startup(command)
+        task_ok, task_message = enable_scheduled_task(command)
         settings.setdefault("startup", {})["enabled"] = True
         save_settings(settings)
         print(f"Startup enabled: {command}")
+        if task_ok:
+            print(f"Scheduled task '{TASK_NAME}' registered for sign-in.")
+        else:
+            print(
+                f"Scheduled task could not be registered: {task_message}. "
+                "The sign-in startup entry is still active."
+            )
         return 0
     if args.action == "disable":
         disable_startup()
+        task_ok, task_message = disable_scheduled_task()
         settings.setdefault("startup", {})["enabled"] = False
         save_settings(settings)
         print("Startup disabled.")
+        if not task_ok:
+            print(f"Scheduled task could not be removed: {task_message}.")
         return 0
     command = startup_command()
-    print(command or "Startup is not enabled.")
+    print(f"Run entry: {command or 'not enabled'}")
+    print(f"Scheduled task: {'registered' if scheduled_task_exists() else 'not registered'}")
     return 0
 
 
